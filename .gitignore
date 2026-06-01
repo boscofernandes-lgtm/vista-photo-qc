@@ -15,4 +15,5 @@ next-env.d.ts
 /_research
 /node.zip
 /build.log
+/build2.log
 /.claude
