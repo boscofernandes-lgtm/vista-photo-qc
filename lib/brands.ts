@@ -14,7 +14,7 @@ export const BRAND_PROFILES: Record<SubBrand, BrandProfile> = {
   vieda: {
     id: "vieda",
     name: "Vieda (uber-luxury)",
-    minScore: 85,
+    minScore: 75,
     comparableTo: "Lohono Stays",
     vibe: "Rich HDR, warm glow, magazine quality. Full F&B editorial styling.",
     targets: {
@@ -30,7 +30,7 @@ export const BRAND_PROFILES: Record<SubBrand, BrandProfile> = {
   villas: {
     id: "villas",
     name: "StayVista Villas",
-    minScore: 70,
+    minScore: 60,
     comparableTo: "SaffronStays",
     vibe: "Golden-hour preferred, full facade, warm consistent grade.",
     targets: {
@@ -46,7 +46,7 @@ export const BRAND_PROFILES: Record<SubBrand, BrandProfile> = {
   veo: {
     id: "veo",
     name: "Veo",
-    minScore: 65,
+    minScore: 60,
     comparableTo: "Elivaas",
     vibe: "Clean, bright, well-lit modern rooms. Neutral whites.",
     targets: {
@@ -62,7 +62,7 @@ export const BRAND_PROFILES: Record<SubBrand, BrandProfile> = {
   vaana: {
     id: "vaana",
     name: "Vaana (lean luxury / glamping)",
-    minScore: 65,
+    minScore: 75,
     comparableTo: "SaffronStays (outdoor)",
     vibe: "Minimalist, serene, soft contrast, raw & organic — no heavy HDR.",
     targets: {
@@ -78,7 +78,7 @@ export const BRAND_PROFILES: Record<SubBrand, BrandProfile> = {
   residences: {
     id: "residences",
     name: "Residences",
-    minScore: 65,
+    minScore: 60,
     comparableTo: "Elivaas",
     vibe: "Bright & airy, +0.3 stops, clean neutral whites, natural sunlight.",
     targets: {
@@ -94,7 +94,7 @@ export const BRAND_PROFILES: Record<SubBrand, BrandProfile> = {
   grams: {
     id: "grams",
     name: "Gram's",
-    minScore: 65,
+    minScore: 60,
     comparableTo: "The Hosteller (social-first)",
     vibe: "Nostalgic, warm filmic vintage-modern, popped greens & blues.",
     targets: {
