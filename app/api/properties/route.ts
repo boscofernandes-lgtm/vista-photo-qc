@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { VISTA_BASE, mapRawProperty, VistaProperty } from "@/lib/vistaApi";
+import { unstable_cache } from "next/cache";
+import { VISTA_BASE, mapRawProperty } from "@/lib/vistaApi";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -8,90 +9,96 @@ export const maxDuration = 60;
  * StayVista catalog search.
  *
  * The upstream /property-list endpoint has no search and a fixed 15/page (118
- * pages). To make search instant we walk the catalog ONCE, keep a slim in-memory
- * index (cached on the warm serverless instance), and serve:
- *   • ?q=<text>  → slim matches by name / city / state (no photos — tiny payload)
- *   • ?id=<id>   → the one selected property WITH its photos, for analysis
- * No query and no id returns an empty result set (search-first UX).
+ * pages). To make search instant AND survive serverless cold starts / multiple
+ * instances, we build a SLIM index (no photos, ~0.4 MB) once and store it in
+ * Vercel's cross-instance Data Cache via unstable_cache. Each slim entry records
+ * the page it lives on, so a single-property fetch pulls just that one page
+ * (itself fetch-cached) and returns the full photo set on demand.
+ *
+ *   ?q=<text>  → slim matches by name / city / state (tiny payload)
+ *   ?id=<id>   → the one selected property WITH photos, for analysis
  */
 
-interface CatalogIndex {
-  at: number;
-  byId: Map<number, VistaProperty>;
-  all: VistaProperty[];
+interface SlimEntry {
+  id: number;
+  name: string;
+  city?: string;
+  state?: string;
+  propertyType?: string;
+  rooms?: number;
+  maxOccupancy?: number;
+  photosCount: number;
+  thumbnail?: string;
+  /** Upstream page this property was found on — for on-demand photo fetch. */
+  page: number;
 }
 
-let INDEX: CatalogIndex | null = null;
-let BUILDING: Promise<CatalogIndex> | null = null;
-const TTL_MS = 30 * 60 * 1000; // 30 min — catalog changes rarely
-const CONCURRENCY = 12;
+const REVALIDATE = 1800; // 30 min
+const CONCURRENCY = 20;
 
-async function fetchPage(
-  page: number,
-  apiKey: string,
-  secretKey: string
-): Promise<{ props: VistaProperty[]; totalPages: number }> {
+/** One upstream page; fetch-cached cross-instance so cold builds stay cheap. */
+async function fetchPageData(page: number, apiKey: string, secretKey: string): Promise<any> {
   const r = await fetch(`${VISTA_BASE}/property-list?page=${page}`, {
     headers: { Accept: "application/json", apiKey, secretKey },
-    cache: "no-store",
+    next: { revalidate: REVALIDATE },
   });
   if (!r.ok) throw new Error(`Vista API ${r.status}`);
-  const d = await r.json();
-  const list: any[] = Array.isArray(d?.response?.data) ? d.response.data : [];
-  const totalPages = d?.response?.pagination?.total_pages ?? 1;
-  return { props: list.map(mapRawProperty).filter((p) => p.id != null), totalPages };
+  return r.json();
 }
 
-async function buildIndex(apiKey: string, secretKey: string): Promise<CatalogIndex> {
-  const first = await fetchPage(1, apiKey, secretKey);
-  const all: VistaProperty[] = [...first.props];
+/** Walk the whole catalog once and return slim entries (cached by unstable_cache). */
+async function buildSlimIndex(apiKey: string, secretKey: string): Promise<SlimEntry[]> {
+  const out: SlimEntry[] = [];
+  const collect = (data: any, page: number) => {
+    const list: any[] = Array.isArray(data?.response?.data) ? data.response.data : [];
+    for (const raw of list) {
+      const p = mapRawProperty(raw);
+      if (p.id == null) continue;
+      out.push({
+        id: p.id,
+        name: p.name,
+        city: p.city,
+        state: p.state,
+        propertyType: p.propertyType,
+        rooms: p.rooms,
+        maxOccupancy: p.maxOccupancy,
+        photosCount: p.photosCount,
+        thumbnail: p.thumbnail,
+        page,
+      });
+    }
+  };
+
+  const first = await fetchPageData(1, apiKey, secretKey);
+  collect(first, 1);
+  const totalPages = first?.response?.pagination?.total_pages ?? 1;
 
   const pages: number[] = [];
-  for (let p = 2; p <= first.totalPages; p++) pages.push(p);
+  for (let p = 2; p <= totalPages; p++) pages.push(p);
 
   for (let i = 0; i < pages.length; i += CONCURRENCY) {
     const batch = pages.slice(i, i + CONCURRENCY);
     const res = await Promise.all(
       batch.map((p) =>
-        fetchPage(p, apiKey, secretKey).catch(() => ({ props: [] as VistaProperty[], totalPages: 0 }))
+        fetchPageData(p, apiKey, secretKey)
+          .then((d) => [d, p] as const)
+          .catch(() => null)
       )
     );
-    res.forEach((r) => all.push(...r.props));
+    for (const r of res) if (r) collect(r[0], r[1]);
   }
-
-  const byId = new Map(all.map((p) => [p.id, p]));
-  return { at: Date.now(), byId, all };
+  return out;
 }
 
-async function getIndex(apiKey: string, secretKey: string): Promise<CatalogIndex> {
-  if (INDEX && Date.now() - INDEX.at < TTL_MS) return INDEX;
-  if (BUILDING) return BUILDING;
-  BUILDING = buildIndex(apiKey, secretKey)
-    .then((idx) => {
-      INDEX = idx;
-      BUILDING = null;
-      return idx;
-    })
-    .catch((e) => {
-      BUILDING = null;
-      throw e;
-    });
-  return BUILDING;
-}
+const getSlimIndex = unstable_cache(
+  (apiKey: string, secretKey: string) => buildSlimIndex(apiKey, secretKey),
+  ["vista-slim-index-v1"],
+  { revalidate: REVALIDATE }
+);
 
-/** Strip photos/amenities for the search list — keep the payload tiny. */
-function slim(p: VistaProperty) {
-  return {
-    id: p.id,
-    name: p.name,
-    city: p.city,
-    state: p.state,
-    propertyType: p.propertyType,
-    rooms: p.rooms,
-    maxOccupancy: p.maxOccupancy,
-    photosCount: p.photosCount,
-    thumbnail: p.thumbnail,
-  };
+function publicEntry(e: SlimEntry) {
+  const { page, ...rest } = e; // hide internal page hint
+  return rest;
 }
 
 export async function GET(req: NextRequest) {
@@ -107,18 +114,27 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const id = sp.get("id");
 
-  let idx: CatalogIndex;
+  let slim: SlimEntry[];
   try {
-    idx = await getIndex(apiKey, secretKey);
+    slim = await getSlimIndex(apiKey, secretKey);
   } catch {
     return NextResponse.json({ error: "Could not reach the Vista API." }, { status: 502 });
   }
 
-  // Single-property fetch (with photos) for the selected listing.
+  // Single-property fetch (with photos) — pulls only the one cached page.
   if (id) {
-    const p = idx.byId.get(Number(id));
-    if (!p) return NextResponse.json({ error: "Property not found" }, { status: 404 });
-    return NextResponse.json({ property: p });
+    const nid = Number(id);
+    const entry = slim.find((e) => e.id === nid);
+    if (!entry) return NextResponse.json({ error: "Property not found" }, { status: 404 });
+    try {
+      const data = await fetchPageData(entry.page, apiKey, secretKey);
+      const list: any[] = Array.isArray(data?.response?.data) ? data.response.data : [];
+      const raw = list.find((r) => r?.id === nid);
+      if (!raw) return NextResponse.json({ error: "Property not found" }, { status: 404 });
+      return NextResponse.json({ property: mapRawProperty(raw) });
+    } catch {
+      return NextResponse.json({ error: "Could not load property." }, { status: 502 });
+    }
   }
 
   // Search.
@@ -126,7 +142,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(60, Math.max(1, parseInt(sp.get("limit") || "40", 10) || 40));
 
   const matches = q
-    ? idx.all.filter(
+    ? slim.filter(
         (p) =>
           p.name.toLowerCase().includes(q) ||
           (p.city ?? "").toLowerCase().includes(q) ||
@@ -135,8 +151,8 @@ export async function GET(req: NextRequest) {
     : [];
 
   return NextResponse.json({
-    results: matches.slice(0, limit).map(slim),
+    results: matches.slice(0, limit).map(publicEntry),
     total: matches.length,
-    indexed: idx.all.length,
+    indexed: slim.length,
   });
 }
