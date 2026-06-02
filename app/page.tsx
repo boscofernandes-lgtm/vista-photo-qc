@@ -35,6 +35,11 @@ export default function Home() {
     setStatus("analyzing");
     setProgress({ done: 0, total: inputs.length });
     const results = await analyzeBatch(inputs, setProgress);
+    if (results.length === 0) {
+      setError("Could not read any of the photos. They may be blocked or in an unsupported format — try the upload option.");
+      setStatus("error");
+      return;
+    }
     setAnalyses(results);
     setStatus("done");
   }
@@ -144,7 +149,8 @@ export default function Home() {
 
         <div className="toolbar" style={{ margin: "14px 0 0" }}>
           <span className="hint" style={{ margin: 0 }}>
-            First run downloads the CLIP model (~150 MB) to your browser, then it&apos;s cached.
+            StayVista listings score instantly. Uploads of unlabeled photos use an
+            in-browser AI model (~150 MB) — pre-load it here so it&apos;s ready.
           </span>
           <button className="ghost" onClick={onWarmup} disabled={warming || busy}>
             {warming ? "Warming up…" : "Pre-load AI model"}
