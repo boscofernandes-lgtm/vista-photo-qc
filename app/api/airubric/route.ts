@@ -11,7 +11,19 @@ export const maxDuration = 60;
  * Response: { mode, categories: { <cat>: { score 1-5, reason } }, summary }
  */
 
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+/**
+ * Model fallback chain. Each model has its OWN free-tier quota pool, so if the
+ * primary is quota-exhausted (429) we transparently try the next one — a single
+ * blocked model can't kill AI scoring during a demo. GEMINI_MODEL (if set) is
+ * tried first; the rest are appended as fallbacks (deduped).
+ */
+const MODELS: string[] = Array.from(
+  new Set(
+    [process.env.GEMINI_MODEL, "gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash"].filter(
+      (m): m is string => !!m
+    )
+  )
+);
 
 type Mode = "hybrid" | "full";
 
@@ -103,7 +115,6 @@ export async function POST(req: NextRequest) {
     parts.push({ inline_data: inline });
   }
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
   const payload = JSON.stringify({
     contents: [{ role: "user", parts }],
     generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
@@ -111,47 +122,60 @@ export async function POST(req: NextRequest) {
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  // Retry transient rate-limit (429) / overload (503) with exponential backoff,
-  // honoring a Retry-After header when Google sends one.
+  // Try each model in the fallback chain. Within a model, retry transient
+  // rate-limit (429) / overload (503) with exponential backoff, honoring
+  // Retry-After. A persistent 429 (quota exhausted) moves on to the next model.
   let gemRes: Response | null = null;
   let lastBody = "";
-  const MAX_TRIES = 3;
-  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
-    try {
-      gemRes = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-      });
-    } catch (e) {
-      return NextResponse.json({ error: `Could not reach Gemini: ${(e as Error).message}` }, { status: 502 });
+  let lastStatus = 502;
+  const MAX_TRIES = 2;
+
+  outer: for (const model of MODELS) {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+    for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+      try {
+        gemRes = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+        });
+      } catch (e) {
+        return NextResponse.json({ error: `Could not reach Gemini: ${(e as Error).message}` }, { status: 502 });
+      }
+
+      if (gemRes.ok) break outer;
+
+      lastBody = await gemRes.text().catch(() => "");
+      lastStatus = gemRes.status;
+
+      // 429 = this model's quota is spent → stop retrying it, try next model.
+      if (gemRes.status === 429) break;
+      // 503 = transient overload → back off and retry the same model.
+      if (gemRes.status === 503 && attempt < MAX_TRIES - 1) {
+        const retryAfter = Number(gemRes.headers.get("retry-after"));
+        const waitMs =
+          Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1200 * 2 ** attempt;
+        await sleep(Math.min(waitMs, 6000));
+        continue;
+      }
+      // Any other non-OK status: don't burn the rest of the chain.
+      break outer;
     }
-
-    if (gemRes.ok) break;
-
-    lastBody = await gemRes.text().catch(() => "");
-    const retriable = gemRes.status === 429 || gemRes.status === 503;
-    if (!retriable || attempt === MAX_TRIES - 1) break;
-
-    const retryAfter = Number(gemRes.headers.get("retry-after"));
-    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * 2 ** attempt;
-    await sleep(Math.min(waitMs, 8000));
   }
 
   if (!gemRes || !gemRes.ok) {
-    const status = gemRes?.status ?? 502;
-    if (status === 429) {
+    if (lastStatus === 429) {
       return NextResponse.json(
         {
           error:
-            "Gemini rate limit reached (free tier allows only a few requests per minute / per day). Wait ~60s and try again, switch to Hybrid mode (fewer categories), or check your quota in Google AI Studio.",
+            "Gemini quota exhausted on all available models (free tier allows only a limited number of requests per day). The daily quota resets at midnight Pacific — or enable billing on your key's Google Cloud project for higher limits. Usage: https://ai.dev/rate-limit",
           detail: lastBody.slice(0, 300),
         },
         { status: 429 }
       );
     }
     return NextResponse.json(
-      { error: `Gemini error ${status}`, detail: lastBody.slice(0, 400) },
+      { error: `Gemini error ${lastStatus}`, detail: lastBody.slice(0, 400) },
       { status: 502 }
     );
   }
