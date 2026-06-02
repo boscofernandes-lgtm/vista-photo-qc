@@ -141,13 +141,20 @@ export async function GET(req: NextRequest) {
   const q = (sp.get("q") || "").trim().toLowerCase();
   const limit = Math.min(60, Math.max(1, parseInt(sp.get("limit") || "40", 10) || 40));
 
+  // A purely-numeric query is treated as a property-ID lookup (exact, then
+  // prefix); otherwise match on name / city / state.
+  const isNumeric = q.length > 0 && /^\d+$/.test(q);
   const matches = q
-    ? slim.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.city ?? "").toLowerCase().includes(q) ||
-          (p.state ?? "").toLowerCase().includes(q)
-      )
+    ? isNumeric
+      ? slim
+          .filter((p) => String(p.id) === q || String(p.id).startsWith(q))
+          .sort((a, b) => (String(a.id) === q ? -1 : 0) - (String(b.id) === q ? -1 : 0))
+      : slim.filter(
+          (p) =>
+            p.name.toLowerCase().includes(q) ||
+            (p.city ?? "").toLowerCase().includes(q) ||
+            (p.state ?? "").toLowerCase().includes(q)
+        )
     : [];
 
   return NextResponse.json({

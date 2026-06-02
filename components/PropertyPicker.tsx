@@ -81,7 +81,7 @@ export default function PropertyPicker({
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by villa name, city or state — e.g. Goa, Lonavala, Mulberry…"
+            placeholder="Search by villa name, city, state, or property ID — e.g. Goa, Lonavala, 5638…"
           />
         </div>
         <div style={{ display: "flex", alignItems: "flex-end" }}>
@@ -144,6 +144,7 @@ export default function PropertyPicker({
                     <div className="picker-loc">
                       {[p.city, p.state].filter(Boolean).join(", ") || p.propertyType || "—"}
                     </div>
+                    <div className="picker-id">ID {p.id}</div>
                   </div>
                 </button>
               ))}
