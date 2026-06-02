@@ -5,6 +5,7 @@ import { scoreProperty } from "@/lib/scoring";
 import { gradeColor, score01Color } from "@/lib/ui";
 import ImageCard from "./ImageCard";
 import Recommendations from "./Recommendations";
+import FixDownload from "./FixDownload";
 
 function Sub({ s }: { s: SubScore }) {
   const pct = s.max > 0 ? s.points / s.max : 0;
@@ -114,6 +115,7 @@ export default function ScoreReport({
                 <div>
                   <div style={{ fontSize: 13 }}>{r.image.input.label ?? "Photo"}</div>
                   <div className="why">{r.reasons.join(" · ")}</div>
+                  <FixDownload a={r.image} />
                 </div>
               </div>
             ))}
