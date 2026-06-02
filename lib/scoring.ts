@@ -56,32 +56,40 @@ function plateau(value: number, lo: number, hi: number, soft: number): number {
   return clamp01(1 - (value - hi) / soft);
 }
 
-/** Map raw CV metrics into 0..1 sub-scores for the Quality pillar. */
+/**
+ * Map raw CV metrics into 0..1 sub-scores for the Quality pillar.
+ *
+ * Curves are calibrated against real StayVista photography so the scores
+ * actually spread: a crisp, bright, well-exposed pro shot lands ~0.85+, a
+ * mediocre one ~0.55, and a dark/blurry/flat shot drops below ~0.4. The
+ * earlier curves were far too forgiving (especially sharpness, which plateaued
+ * at 1.0 for nearly everything), which compressed every property into 75–85.
+ */
 export function computeImageScores(cv: CVMetrics): ImageScores {
-  // Lighting: well-exposed mid-tones, minimal blown/crushed pixels.
-  const exposure = bell(cv.brightness, 150, 55);
-  const clipPenalty = clamp01(cv.clipHigh * 2.5 + cv.clipLow * 1.8);
+  // Lighting: well-exposed mid-tones in a tight band; punish blown/crushed pixels.
+  const exposure = bell(cv.brightness, 145, 42);
+  const clipPenalty = clamp01(cv.clipHigh * 3 + cv.clipLow * 2);
   const lighting = clamp01(exposure * (1 - clipPenalty));
 
-  // Angles & Frames: composition (rule of thirds) + sensible landscape aspect.
-  const aspectScore = plateau(cv.aspect, 1.3, 1.9, 0.8);
+  // Angles & Frames: composition (rule of thirds) + a sensible landscape window.
+  const aspectScore = plateau(cv.aspect, 1.4, 1.85, 0.55);
   const angles = clamp01(0.7 * cv.thirds + 0.3 * aspectScore);
 
   // Edits: healthy contrast & saturation, neutral white balance, low noise, sharp.
-  const contrastScore = bell(cv.contrast, 55, 30);
-  const saturationScore = bell(cv.saturation, 0.45, 0.25);
-  const wbScore = clamp01(1 - cv.colorCast);
-  const noiseScore = clamp01(1 - cv.noise);
-  // Sharpness: ramp up out of blur, then stay high. The upper falloff is gentle
-  // (wide `soft`) so genuinely crisp pro photos aren't punished for being sharp —
-  // only extreme over-sharpening haloing drifts down.
-  const sharpScore = plateau(cv.sharpness, 120, 6000, 4000);
+  const contrastScore = bell(cv.contrast, 62, 22);
+  const saturationScore = bell(cv.saturation, 0.42, 0.18);
+  const wbScore = clamp01(1 - cv.colorCast * 1.3);
+  const noiseScore = clamp01(1 - cv.noise * 1.2);
+  // Sharpness: full credit only when the shot is genuinely crisp (Laplacian
+  // variance ~1400+ at working size), ramping down through softness to blur.
+  // The previous floor of 120 gave every in-focus photo a perfect 1.0.
+  const sharpScore = plateau(cv.sharpness, 1400, 7000, 1400);
   const edits = clamp01(
-    0.25 * contrastScore +
-      0.2 * saturationScore +
-      0.2 * wbScore +
-      0.15 * noiseScore +
-      0.2 * sharpScore
+    0.28 * contrastScore +
+      0.16 * saturationScore +
+      0.18 * wbScore +
+      0.1 * noiseScore +
+      0.28 * sharpScore
   );
 
   return { lighting, angles, edits };
@@ -90,13 +98,13 @@ export function computeImageScores(cv: CVMetrics): ImageScores {
 /** Hard, human-readable flags for an individual image. */
 export function imageFlags(cv: CVMetrics, s: ImageScores): string[] {
   const f: string[] = [];
-  if (cv.sharpness < 80) f.push("Blurry / soft focus");
-  if (cv.brightness < 70) f.push("Underexposed (too dark)");
+  if (cv.sharpness < 700) f.push("Blurry / soft focus");
+  if (cv.brightness < 85) f.push("Underexposed (too dark)");
   if (cv.brightness > 205) f.push("Overexposed (too bright)");
   if (cv.clipHigh > 0.12) f.push("Blown highlights");
   if (cv.megapixels < 1.0) f.push("Low resolution");
-  if (cv.colorCast > 0.5) f.push("Strong color cast");
-  if (cv.noise > 0.6) f.push("Noisy / grainy");
+  if (cv.colorCast > 0.45) f.push("Strong color cast");
+  if (cv.noise > 0.55) f.push("Noisy / grainy");
   if (s.angles < 0.4) f.push("Weak framing / composition");
   return f;
 }
@@ -107,14 +115,21 @@ export function scoreProperty(analyses: ImageAnalysis[], weights: Weights): Prop
   const subScores: SubScore[] = [];
   const n = Math.max(1, analyses.length);
 
-  // ---- Quality pillar: average each sub-score across all images ----
-  const avg = (sel: (s: ImageScores) => number) =>
-    analyses.reduce((a, x) => a + sel(x.scores), 0) / n;
+  // ---- Quality pillar: weak-tail blend of each sub-score across all images ----
+  // A listing is only as strong as its weak links, so we don't reward a high
+  // average that hides several poor photos. We blend the mean with the 25th
+  // percentile, pulling the score toward the weaker quarter of the set.
+  const blendWeakTail = (sel: (s: ImageScores) => number) => {
+    const vals = analyses.map((x) => sel(x.scores)).sort((a, b) => a - b);
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const p25 = vals[Math.floor(vals.length * 0.25)] ?? mean;
+    return 0.6 * mean + 0.4 * p25;
+  };
 
   const qAvg = {
-    lighting: avg((s) => s.lighting),
-    angles: avg((s) => s.angles),
-    edits: avg((s) => s.edits),
+    lighting: blendWeakTail((s) => s.lighting),
+    angles: blendWeakTail((s) => s.angles),
+    edits: blendWeakTail((s) => s.edits),
   };
 
   const qualitySubs: SubScore[] = [
