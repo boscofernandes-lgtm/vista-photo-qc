@@ -35,12 +35,23 @@ export function categoryFromLabel(label?: string): ShotCategory | null {
   if (!label) return null;
   const s = label.toLowerCase();
   if (/gallery|photo|image|^\s*$/.test(s)) return null;
-  if (/facade|exterior|elevation|entrance|front|outside|building/.test(s))
+
+  // Cover / facade — the exterior identity shots.
+  if (/facade|exterior|elevation|entrance|front|outside|building|aerial|drone|porch/.test(s))
     return "cover_facade";
-  if (/pool|lawn|garden|outdoor|deck|terrace|balcony|view|lifestyle|experience/.test(s))
-    return "lifestyle";
+
+  // Lifestyle — outdoor amenities & experiences (checked before interiors so an
+  // "outdoor sitting area" is lifestyle, not a generic "sitting" interior).
   if (
-    /bed|living|kitchen|bath|wash|dining|dinning|hall|room|interior|lounge|study|kids|master|suite/.test(
+    /pool|jacuzzi|hot ?tub|plunge|lawn|garden|outdoor|out ?door|al ?fresco|deck|terrace|balcony|patio|courtyard|gazebo|sit-?out|view|lake|river|beach|sunset|bonfire|fire ?pit|campfire|barbe|bbq|grill|spa|sauna|gym|game|play|amenit|experience|lifestyle/.test(
+      s
+    )
+  )
+    return "lifestyle";
+
+  // Set ups — interiors & food/drink styling.
+  if (
+    /bed|living|kitchen|bath|wash|dining|dinning|food|drink|breakfast|meal|cafe|pantry|hall|room|interior|indoor|lounge|sitting|seating|study|kids|master|suite|foyer|stair/.test(
       s
     )
   )

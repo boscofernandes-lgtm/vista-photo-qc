@@ -90,6 +90,41 @@ export interface PropertyScore {
   imageCount: number;
 }
 
+/** Per-photo, listing-readiness recommendation. */
+export interface PhotoVerdict {
+  image: ImageAnalysis;
+  /** Position in the current listing order (0-based). */
+  currentIndex: number;
+  verdict: "strong" | "ok" | "improve";
+  note: string;
+}
+
+export interface HeroPick {
+  image: ImageAnalysis;
+  currentIndex: number;
+  /** True when this is already the first photo on the listing. */
+  isCurrentCover: boolean;
+  reason: string;
+}
+
+/** A photo in the suggested running order. */
+export interface OrderedShot {
+  image: ImageAnalysis;
+  currentIndex: number;
+  /** 0-based suggested position. */
+  suggestedIndex: number;
+}
+
+export interface Recommendations {
+  hero: HeroPick | null;
+  order: OrderedShot[];
+  /** True when the suggested order differs from the current order. */
+  reorderNeeded: boolean;
+  verdicts: PhotoVerdict[];
+  strongCount: number;
+  improveCount: number;
+}
+
 export interface PropertyMeta {
   name: string;
   city?: string;

@@ -72,7 +72,10 @@ export function computeImageScores(cv: CVMetrics): ImageScores {
   const saturationScore = bell(cv.saturation, 0.45, 0.25);
   const wbScore = clamp01(1 - cv.colorCast);
   const noiseScore = clamp01(1 - cv.noise);
-  const sharpScore = plateau(cv.sharpness, 120, 4000, 120); // soft floor on blur
+  // Sharpness: ramp up out of blur, then stay high. The upper falloff is gentle
+  // (wide `soft`) so genuinely crisp pro photos aren't punished for being sharp —
+  // only extreme over-sharpening haloing drifts down.
+  const sharpScore = plateau(cv.sharpness, 120, 6000, 4000);
   const edits = clamp01(
     0.25 * contrastScore +
       0.2 * saturationScore +

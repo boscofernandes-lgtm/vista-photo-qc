@@ -4,6 +4,7 @@ import { ImageAnalysis, PropertyMeta, SubScore, Weights } from "@/lib/types";
 import { scoreProperty } from "@/lib/scoring";
 import { gradeColor, score01Color } from "@/lib/ui";
 import ImageCard from "./ImageCard";
+import Recommendations from "./Recommendations";
 
 function Sub({ s }: { s: SubScore }) {
   const pct = s.max > 0 ? s.points / s.max : 0;
@@ -83,6 +84,8 @@ export default function ScoreReport({
           </div>
         </div>
       </div>
+
+      <Recommendations analyses={analyses} />
 
       <div className="section-title">Score breakdown</div>
       <div className="pillars">
