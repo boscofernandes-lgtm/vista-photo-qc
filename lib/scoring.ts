@@ -1,13 +1,19 @@
 import {
+  AIRubricResult,
   CVMetrics,
   GradeBand,
   ImageAnalysis,
   ImageScores,
   PropertyScore,
   ShotCategory,
+  SubBrand,
   SubScore,
   Weights,
 } from "./types";
+import { BASE_TARGETS, brandProfile, DEFAULT_BRAND } from "./brands";
+
+type Targets = typeof BASE_TARGETS;
+type CatKey = "cover" | "setups" | "lifestyle" | "lighting" | "angles" | "edits";
 
 export const DEFAULT_WEIGHTS: Weights = {
   shots: { cover: 5, setups: 5, lifestyle: 5 },
@@ -57,17 +63,27 @@ function plateau(value: number, lo: number, hi: number, soft: number): number {
 }
 
 /**
- * Map raw CV metrics into 0..1 sub-scores for the Quality pillar.
- *
- * Curves are calibrated against real StayVista photography so the scores
- * actually spread: a crisp, bright, well-exposed pro shot lands ~0.85+, a
- * mediocre one ~0.55, and a dark/blurry/flat shot drops below ~0.4. The
- * earlier curves were far too forgiving (especially sharpness, which plateaued
- * at 1.0 for nearly everything), which compressed every property into 75–85.
+ * Map a 0..1 sub-score onto the StayVista 1–5 rubric band (floored at 1, the way
+ * a human QC scorer fills the scorecard).
  */
-export function computeImageScores(cv: CVMetrics): ImageScores {
+export function band1to5(x01: number): number {
+  const s = clamp01(x01);
+  if (s >= 0.85) return 5;
+  if (s >= 0.66) return 4;
+  if (s >= 0.48) return 3;
+  if (s >= 0.28) return 2;
+  return 1;
+}
+
+/**
+ * Map raw CV metrics into 0..1 sub-scores for the Quality pillar, using the
+ * brand's editing-direction targets (e.g. Residences is brighter & more neutral,
+ * Vieda is warmer & higher-contrast). Curves are calibrated against real
+ * StayVista photography so the scores actually spread.
+ */
+export function computeImageScores(cv: CVMetrics, targets: Targets = BASE_TARGETS): ImageScores {
   // Lighting: well-exposed mid-tones in a tight band; punish blown/crushed pixels.
-  const exposure = bell(cv.brightness, 145, 42);
+  const exposure = bell(cv.brightness, targets.brightnessCenter, targets.brightnessSpread);
   const clipPenalty = clamp01(cv.clipHigh * 3 + cv.clipLow * 2);
   const lighting = clamp01(exposure * (1 - clipPenalty));
 
@@ -75,14 +91,12 @@ export function computeImageScores(cv: CVMetrics): ImageScores {
   const aspectScore = plateau(cv.aspect, 1.4, 1.85, 0.55);
   const angles = clamp01(0.7 * cv.thirds + 0.3 * aspectScore);
 
-  // Edits: healthy contrast & saturation, neutral white balance, low noise, sharp.
-  const contrastScore = bell(cv.contrast, 62, 22);
-  const saturationScore = bell(cv.saturation, 0.42, 0.18);
-  const wbScore = clamp01(1 - cv.colorCast * 1.3);
+  // Edits: healthy contrast & saturation, neutral-or-warm WB (per brand), low noise, sharp.
+  const contrastScore = bell(cv.contrast, targets.contrastCenter, targets.contrastSpread);
+  const saturationScore = bell(cv.saturation, targets.saturationCenter, targets.saturationSpread);
+  const wbScore = clamp01(1 - cv.colorCast * targets.castTolerance);
   const noiseScore = clamp01(1 - cv.noise * 1.2);
-  // Sharpness: full credit only when the shot is genuinely crisp (Laplacian
-  // variance ~1400+ at working size), ramping down through softness to blur.
-  // The previous floor of 120 gave every in-focus photo a perfect 1.0.
+  // Sharpness: full credit only when genuinely crisp (~1400+), ramping from soft.
   const sharpScore = plateau(cv.sharpness, 1400, 7000, 1400);
   const edits = clamp01(
     0.28 * contrastScore +
@@ -111,16 +125,31 @@ export function imageFlags(cv: CVMetrics, s: ImageScores): string[] {
 
 const meanQuality = (s: ImageScores) => (s.lighting + s.angles + s.edits) / 3;
 
-export function scoreProperty(analyses: ImageAnalysis[], weights: Weights): PropertyScore {
-  const subScores: SubScore[] = [];
-  const n = Math.max(1, analyses.length);
+export interface ScoreOptions {
+  brand?: SubBrand;
+  ai?: AIRubricResult | null;
+}
+
+export function scoreProperty(
+  analyses: ImageAnalysis[],
+  weights: Weights,
+  opts: ScoreOptions = {}
+): PropertyScore {
+  const brand = opts.brand ?? DEFAULT_BRAND;
+  const profile = brandProfile(brand);
+  const targets = profile.targets;
+  const aiCats = opts.ai?.categories ?? {};
+
+  // Re-score every image against the selected brand's curves so switching the
+  // sub-brand selector updates the report instantly (no re-analysis needed).
+  const scored = analyses.map((a) => ({ a, s: computeImageScores(a.cv, targets) }));
 
   // ---- Quality pillar: weak-tail blend of each sub-score across all images ----
   // A listing is only as strong as its weak links, so we don't reward a high
   // average that hides several poor photos. We blend the mean with the 25th
   // percentile, pulling the score toward the weaker quarter of the set.
   const blendWeakTail = (sel: (s: ImageScores) => number) => {
-    const vals = analyses.map((x) => sel(x.scores)).sort((a, b) => a - b);
+    const vals = scored.map((x) => sel(x.s)).sort((a, b) => a - b);
     const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
     const p25 = vals[Math.floor(vals.length * 0.25)] ?? mean;
     return 0.6 * mean + 0.4 * p25;
@@ -132,84 +161,89 @@ export function scoreProperty(analyses: ImageAnalysis[], weights: Weights): Prop
     edits: blendWeakTail((s) => s.edits),
   };
 
-  const qualitySubs: SubScore[] = [
-    {
-      key: "lighting",
-      label: "Lighting",
-      points: qAvg.lighting * weights.quality.lighting,
-      max: weights.quality.lighting,
-      detail: `Avg exposure quality across ${analyses.length} photos`,
-    },
-    {
-      key: "angles",
-      label: "Angles & Frames",
-      points: qAvg.angles * weights.quality.angles,
-      max: weights.quality.angles,
-      detail: "Composition (rule of thirds) & framing",
-    },
-    {
-      key: "edits",
-      label: "Edits",
-      points: qAvg.edits * weights.quality.edits,
-      max: weights.quality.edits,
-      detail: "Contrast, color, white balance, noise & sharpness",
-    },
-  ];
-
-  // ---- Shots pillar: coverage = enough good shots of each required type ----
-  const bucketOf = (a: ImageAnalysis): ShotCategory =>
-    a.uncertain ? "other" : a.clip.top;
-
-  const coverageSub = (
-    cat: Exclude<ShotCategory, "other">,
-    key: string,
+  // Build a sub-score, honouring an AI override for that category when present.
+  const make = (
+    key: CatKey,
     label: string,
-    weight: number
+    cv01: number,
+    max: number,
+    cvDetail: string
   ): SubScore => {
-    const imgs = analyses.filter((a) => bucketOf(a) === cat);
-    if (imgs.length === 0) {
-      return { key, label, points: 0, max: weight, detail: `No ${label.toLowerCase()} shots detected` };
+    const ov = aiCats[key];
+    if (ov) {
+      const x01 = clamp01((ov.score - 1) / 4);
+      return {
+        key,
+        label,
+        points: x01 * max,
+        max,
+        detail: ov.reason || "AI rubric score",
+        band: Math.round(Math.max(1, Math.min(5, ov.score))),
+        source: "ai",
+      };
     }
-    const countScore = clamp01(imgs.length / COVERAGE_TARGET[cat]);
-    const qualScore = imgs.reduce((a, x) => a + meanQuality(x.scores), 0) / imgs.length;
-    const cat01 = clamp01(0.5 * countScore + 0.5 * qualScore);
-    return {
-      key,
-      label,
-      points: cat01 * weight,
-      max: weight,
-      detail: `${imgs.length} shot(s), avg quality ${(qualScore * 100).toFixed(0)}%`,
-    };
+    return { key, label, points: cv01 * max, max, detail: cvDetail, band: band1to5(cv01), source: "cv" };
   };
 
+  // ---- Shots pillar: coverage = enough good shots of each required type ----
+  const bucketOf = (a: ImageAnalysis): ShotCategory => (a.uncertain ? "other" : a.clip.top);
+
+  const coverage01 = (cat: Exclude<ShotCategory, "other">): { cv01: number; detail: string } => {
+    const imgs = scored.filter((x) => bucketOf(x.a) === cat);
+    if (imgs.length === 0) return { cv01: 0, detail: `No shots of this type detected` };
+    const countScore = clamp01(imgs.length / COVERAGE_TARGET[cat]);
+    const qualScore = imgs.reduce((a, x) => a + meanQuality(x.s), 0) / imgs.length;
+    const cv01 = clamp01(0.5 * countScore + 0.5 * qualScore);
+    return { cv01, detail: `${imgs.length} shot(s), avg quality ${(qualScore * 100).toFixed(0)}%` };
+  };
+
+  const cov = coverage01("cover_facade");
+  const setu = coverage01("setups_interiors");
+  const life = coverage01("lifestyle");
+
   const shotsSubs: SubScore[] = [
-    coverageSub("cover_facade", "cover", "Cover & Facade", weights.shots.cover),
-    coverageSub("setups_interiors", "setups", "Set ups (Food & Interiors)", weights.shots.setups),
-    coverageSub("lifestyle", "lifestyle", "Lifestyle (Service, Guest, Experiences)", weights.shots.lifestyle),
+    make("cover", "Cover & Facade", cov.cv01, weights.shots.cover, cov.detail),
+    make("setups", "Set ups (Food & Interiors)", setu.cv01, weights.shots.setups, setu.detail),
+    make("lifestyle", "Lifestyle (Service, Guest, Experiences)", life.cv01, weights.shots.lifestyle, life.detail),
   ];
 
-  subScores.push(...shotsSubs, ...qualitySubs);
+  const qualitySubs: SubScore[] = [
+    make("lighting", "Lighting", qAvg.lighting, weights.quality.lighting, `Avg exposure quality across ${analyses.length} photos`),
+    make("angles", "Angles & Frames", qAvg.angles, weights.quality.angles, "Composition (rule of thirds) & framing"),
+    make("edits", "Edits", qAvg.edits, weights.quality.edits, "Contrast, color, white balance, noise & sharpness"),
+  ];
+
+  const subScores: SubScore[] = [...shotsSubs, ...qualitySubs];
 
   const shotsPillar = shotsSubs.reduce((a, s) => a + s.points, 0);
   const qualityPillar = qualitySubs.reduce((a, s) => a + s.points, 0);
   const earned = shotsPillar + qualityPillar;
   const maxPoints = subScores.reduce((a, s) => a + s.max, 0) || 1;
   const total100 = (earned / maxPoints) * 100;
+
+  // Integer 1–5 rubric scorecard, normalised to /100 (the MIS scale).
+  const bandSum = subScores.reduce((a, s) => a + s.band, 0);
+  const banded100 = (bandSum / (subScores.length * 5)) * 100;
+
   const band = gradeFor(total100);
+  const threshold = profile.minScore;
 
   // ---- Reshoot list: images dragging the score down ----
-  const reshootList = analyses
-    .map((a) => ({ image: a, reasons: a.flags }))
-    .filter((r) => r.reasons.length > 0 || meanQuality(r.image.scores) < 0.5)
+  const reshootList = scored
+    .map(({ a, s }) => ({ image: a, reasons: imageFlags(a.cv, s), s }))
+    .filter((r) => r.reasons.length > 0 || meanQuality(r.s) < 0.5)
     .map((r) => ({
       image: r.image,
       reasons: r.reasons.length ? r.reasons : ["Low overall quality score"],
+      s: r.s,
     }))
-    .sort((a, b) => meanQuality(a.image.scores) - meanQuality(b.image.scores));
+    .sort((a, b) => meanQuality(a.s) - meanQuality(b.s))
+    .map(({ image, reasons }) => ({ image, reasons }));
 
   return {
     total30: earned,
     total100: Math.round(total100),
+    banded100: Math.round(banded100),
     grade: band.grade,
     solution: band.solution,
     shotsPillar,
@@ -217,5 +251,10 @@ export function scoreProperty(analyses: ImageAnalysis[], weights: Weights): Prop
     subScores,
     reshootList,
     imageCount: analyses.length,
+    brand,
+    threshold,
+    pass: Math.round(total100) >= threshold,
+    aiAssisted: Object.keys(aiCats).length > 0,
+    aiSummary: opts.ai?.summary,
   };
 }

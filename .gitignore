@@ -13,6 +13,7 @@ next-env.d.ts
 # local-only toolchain & research artifacts
 /.tools
 /_research
+/_knowledge
 /node.zip
 /build*.log
 /.claude

@@ -1,20 +1,25 @@
 "use client";
 
-import { ImageAnalysis, PropertyMeta, SubScore, Weights } from "@/lib/types";
+import { AIRubricResult, ImageAnalysis, PropertyMeta, SubBrand, SubScore, Weights } from "@/lib/types";
 import { scoreProperty } from "@/lib/scoring";
 import { gradeColor, score01Color } from "@/lib/ui";
 import ImageCard from "./ImageCard";
 import Recommendations from "./Recommendations";
 import FixDownload from "./FixDownload";
+import BenchmarkPanel from "./BenchmarkPanel";
 
 function Sub({ s }: { s: SubScore }) {
   const pct = s.max > 0 ? s.points / s.max : 0;
   return (
     <div className="sub">
       <div className="line">
-        <span>{s.label}</span>
         <span>
-          {s.points.toFixed(1)} / {s.max}
+          {s.label}
+          <span className={`src-tag ${s.source}`}>{s.source === "ai" ? "AI" : "CV"}</span>
+        </span>
+        <span>
+          <span className={`band b${s.band}`}>{s.band}/5</span>
+          <span className="pts">{s.points.toFixed(1)} / {s.max}</span>
         </span>
       </div>
       <div className="bar">
@@ -29,12 +34,16 @@ export default function ScoreReport({
   meta,
   analyses,
   weights,
+  brand,
+  ai,
 }: {
   meta: PropertyMeta;
   analyses: ImageAnalysis[];
   weights: Weights;
+  brand: SubBrand;
+  ai: AIRubricResult | null;
 }) {
-  const result = scoreProperty(analyses, weights);
+  const result = scoreProperty(analyses, weights, { brand, ai });
   const color = gradeColor(result.grade);
   const shotsSubs = result.subScores.filter((s) =>
     ["cover", "setups", "lifestyle"].includes(s.key)
@@ -67,24 +76,40 @@ export default function ScoreReport({
               {meta.photosCount ? ` · ${meta.photosCount} photos on listing` : ""}
               {` · ${result.imageCount} analyzed`}
             </div>
-            <div style={{ marginTop: 12 }}>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
               <span
                 className="grade-pill"
                 style={{ background: `${color}22`, color, border: `1px solid ${color}55` }}
               >
                 {result.grade}
               </span>
+              <span className={`pass-pill ${result.pass ? "pass" : "fail"}`}>
+                {result.pass ? `Passes ${result.threshold}+ bar` : `Below ${result.threshold}+ bar`}
+              </span>
+              {result.aiAssisted && <span className="ai-badge">AI-assisted</span>}
             </div>
             <div className="solution">
               <strong>Recommended action:</strong> {result.solution}
             </div>
+            <div className="scale-row">
+              <div className="scale-box">
+                <div className="scale-num">{result.banded100}</div>
+                <div className="scale-lbl">Rubric scorecard /100 (1–5 bands)</div>
+              </div>
+              <div className="scale-box">
+                <div className="scale-num">{result.total30.toFixed(1)}</div>
+                <div className="scale-lbl">Raw points / 30</div>
+              </div>
+            </div>
             <div className="hint">
-              Raw rubric score: {result.total30.toFixed(1)} pts · Shots{" "}
-              {result.shotsPillar.toFixed(1)} · Quality {result.qualityPillar.toFixed(1)}
+              Shots {result.shotsPillar.toFixed(1)} · Quality {result.qualityPillar.toFixed(1)}
+              {result.aiSummary ? ` · ${result.aiSummary}` : ""}
             </div>
           </div>
         </div>
       </div>
+
+      <BenchmarkPanel result={result} brand={brand} />
 
       <Recommendations analyses={analyses} />
 

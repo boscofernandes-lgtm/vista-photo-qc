@@ -69,6 +69,61 @@ export interface SubScore {
   points: number;
   max: number;
   detail: string;
+  /** Integer 1–5 rubric band (StayVista scorecard scale, floored at 1). */
+  band: number;
+  /** Where this category's score came from. */
+  source: "cv" | "ai";
+}
+
+/** StayVista sub-brands, each with its own pass bar and editing direction. */
+export type SubBrand = "vieda" | "villas" | "veo" | "vaana" | "residences" | "grams";
+
+/** Per-brand scoring profile: pass threshold + CV target curves (editing direction). */
+export interface BrandProfile {
+  id: SubBrand;
+  name: string;
+  /** Minimum FrameCheck score (/100) to go live for this brand. */
+  minScore: number;
+  /** Competitor this brand is benchmarked against. */
+  comparableTo: string;
+  /** One-line editing direction from the QC knowledge base. */
+  vibe: string;
+  /** CV curve centers tuned to this brand's editing direction. */
+  targets: {
+    brightnessCenter: number;
+    brightnessSpread: number;
+    contrastCenter: number;
+    contrastSpread: number;
+    saturationCenter: number;
+    saturationSpread: number;
+    /** Multiplier on the white-balance penalty — lower = warm cast tolerated. */
+    castTolerance: number;
+  };
+}
+
+/** One competitor row from the QC knowledge base benchmark table. */
+export interface CompetitorBenchmark {
+  brand: string;
+  tier: string;
+  cover: number;
+  setups: number;
+  lifestyle: number;
+  lighting: number;
+  angles: number;
+  isBenchmark?: boolean;
+  note: string;
+}
+
+/** Result of the optional Gemini rubric pass. */
+export interface AIRubricResult {
+  mode: "hybrid" | "full";
+  categories: Partial<
+    Record<
+      "cover" | "setups" | "lifestyle" | "lighting" | "angles" | "edits",
+      { score: number; reason: string }
+    >
+  >;
+  summary: string;
 }
 
 export interface GradeBand {
@@ -81,6 +136,8 @@ export interface GradeBand {
 export interface PropertyScore {
   total30: number;
   total100: number;
+  /** Score from the integer 1–5 rubric bands, normalised to /100 (MIS scale). */
+  banded100: number;
   grade: string;
   solution: string;
   shotsPillar: number; // 0..15 (or weighted max)
@@ -88,6 +145,16 @@ export interface PropertyScore {
   subScores: SubScore[];
   reshootList: { image: ImageAnalysis; reasons: string[] }[];
   imageCount: number;
+  /** Sub-brand this property was scored against. */
+  brand: SubBrand;
+  /** Pass threshold (/100) for that brand. */
+  threshold: number;
+  /** True when total100 meets the brand's minimum to go live. */
+  pass: boolean;
+  /** True when one or more categories were scored by the AI rubric pass. */
+  aiAssisted: boolean;
+  /** Short AI summary, when the Gemini pass ran. */
+  aiSummary?: string;
 }
 
 /** Per-photo, listing-readiness recommendation. */

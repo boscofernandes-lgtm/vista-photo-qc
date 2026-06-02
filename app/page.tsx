@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { analyzeBatch, AnalyzeProgress } from "@/lib/analyze";
 import { DEFAULT_WEIGHTS } from "@/lib/scoring";
-import { ImageAnalysis, ImageInput, PropertyMeta, Weights } from "@/lib/types";
+import { DEFAULT_BRAND } from "@/lib/brands";
+import { AIRubricResult, ImageAnalysis, ImageInput, PropertyMeta, SubBrand, Weights } from "@/lib/types";
 import WeightsPanel from "@/components/WeightsPanel";
 import ScoreReport from "@/components/ScoreReport";
+import BrandAIControls from "@/components/BrandAIControls";
 
 type Status = "idle" | "scraping" | "analyzing" | "done" | "error";
 
@@ -20,6 +22,9 @@ export default function Home() {
   const [meta, setMeta] = useState<PropertyMeta | null>(null);
   const [analyses, setAnalyses] = useState<ImageAnalysis[] | null>(null);
   const [weights, setWeights] = useState<Weights>(() => JSON.parse(JSON.stringify(DEFAULT_WEIGHTS)));
+  const [brand, setBrand] = useState<SubBrand>(DEFAULT_BRAND);
+  const [aiMode, setAiMode] = useState<"hybrid" | "full">("hybrid");
+  const [ai, setAi] = useState<AIRubricResult | null>(null);
 
   const busy = status === "scraping" || status === "analyzing";
 
@@ -30,6 +35,7 @@ export default function Home() {
       return;
     }
     setMeta(m);
+    setAi(null);
     setStatus("analyzing");
     setProgress({ done: 0, total: inputs.length });
     const results = await analyzeBatch(inputs, setProgress);
@@ -162,9 +168,19 @@ export default function Home() {
 
       {status === "done" && analyses && analyses.length > 0 && meta && (
         <div style={{ marginTop: 22 }}>
+          <BrandAIControls
+            analyses={analyses}
+            brand={brand}
+            onBrandChange={setBrand}
+            aiMode={aiMode}
+            onAIModeChange={setAiMode}
+            ai={ai}
+            onAIResult={setAi}
+          />
+          <div style={{ height: 18 }} />
           <WeightsPanel weights={weights} onChange={setWeights} />
           <div style={{ height: 18 }} />
-          <ScoreReport meta={meta} analyses={analyses} weights={weights} />
+          <ScoreReport meta={meta} analyses={analyses} weights={weights} brand={brand} ai={ai} />
         </div>
       )}
     </div>
