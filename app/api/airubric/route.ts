@@ -87,7 +87,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Cap images to keep token cost + latency bounded; sample evenly across the set.
-  const MAX = 12;
+  // Fewer images = fewer tokens = less likely to trip the free-tier rate limit.
+  const MAX = 8;
   let sample = images;
   if (images.length > MAX) {
     const step = images.length / MAX;
@@ -103,25 +104,54 @@ export async function POST(req: NextRequest) {
   }
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${key}`;
+  const payload = JSON.stringify({
+    contents: [{ role: "user", parts }],
+    generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
+  });
 
-  let gemRes: Response;
-  try {
-    gemRes = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
-      }),
-    });
-  } catch (e) {
-    return NextResponse.json({ error: `Could not reach Gemini: ${(e as Error).message}` }, { status: 502 });
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // Retry transient rate-limit (429) / overload (503) with exponential backoff,
+  // honoring a Retry-After header when Google sends one.
+  let gemRes: Response | null = null;
+  let lastBody = "";
+  const MAX_TRIES = 3;
+  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+    try {
+      gemRes = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      });
+    } catch (e) {
+      return NextResponse.json({ error: `Could not reach Gemini: ${(e as Error).message}` }, { status: 502 });
+    }
+
+    if (gemRes.ok) break;
+
+    lastBody = await gemRes.text().catch(() => "");
+    const retriable = gemRes.status === 429 || gemRes.status === 503;
+    if (!retriable || attempt === MAX_TRIES - 1) break;
+
+    const retryAfter = Number(gemRes.headers.get("retry-after"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1500 * 2 ** attempt;
+    await sleep(Math.min(waitMs, 8000));
   }
 
-  if (!gemRes.ok) {
-    const txt = await gemRes.text().catch(() => "");
+  if (!gemRes || !gemRes.ok) {
+    const status = gemRes?.status ?? 502;
+    if (status === 429) {
+      return NextResponse.json(
+        {
+          error:
+            "Gemini rate limit reached (free tier allows only a few requests per minute / per day). Wait ~60s and try again, switch to Hybrid mode (fewer categories), or check your quota in Google AI Studio.",
+          detail: lastBody.slice(0, 300),
+        },
+        { status: 429 }
+      );
+    }
     return NextResponse.json(
-      { error: `Gemini error ${gemRes.status}`, detail: txt.slice(0, 400) },
+      { error: `Gemini error ${status}`, detail: lastBody.slice(0, 400) },
       { status: 502 }
     );
   }
