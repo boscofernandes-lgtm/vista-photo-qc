@@ -1,9 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { VistaProperty, VistaPagination } from "@/lib/vistaApi";
+import { FormEvent, useState } from "react";
+import { VistaProperty } from "@/lib/vistaApi";
 
-type LoadState = "idle" | "loading" | "done" | "error";
+interface SlimProperty {
+  id: number;
+  name: string;
+  city?: string;
+  state?: string;
+  propertyType?: string;
+  photosCount: number;
+  thumbnail?: string;
+}
+
+type State = "idle" | "indexing" | "searching" | "done" | "error";
 
 export default function PropertyPicker({
   onSelect,
@@ -12,74 +22,83 @@ export default function PropertyPicker({
   onSelect: (p: VistaProperty) => void;
   busy: boolean;
 }) {
-  const [page, setPage] = useState(1);
-  const [state, setState] = useState<LoadState>("idle");
+  const [q, setQ] = useState("");
+  const [state, setState] = useState<State>("idle");
   const [err, setErr] = useState("");
-  const [properties, setProperties] = useState<VistaProperty[]>([]);
-  const [pagination, setPagination] = useState<VistaPagination | null>(null);
-  const [filter, setFilter] = useState("");
+  const [results, setResults] = useState<SlimProperty[]>([]);
+  const [total, setTotal] = useState(0);
+  const [indexed, setIndexed] = useState(0);
+  const [selectingId, setSelectingId] = useState<number | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setState("loading");
-      setErr("");
-      try {
-        const res = await fetch(`/api/properties?page=${page}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Failed to load properties");
-        if (cancelled) return;
-        setProperties(data.properties ?? []);
-        setPagination(data.pagination ?? null);
-        setState("done");
-      } catch (e: any) {
-        if (cancelled) return;
-        setErr(e.message ?? "Failed to load properties");
-        setState("error");
-      }
+  async function doSearch(e?: FormEvent) {
+    e?.preventDefault();
+    const query = q.trim();
+    if (!query) {
+      setResults([]);
+      setState("idle");
+      return;
     }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [page]);
+    // First search may build the server-side index (one-time, a few seconds).
+    setState(indexed ? "searching" : "indexing");
+    setErr("");
+    try {
+      const res = await fetch(`/api/properties?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Search failed");
+      setResults(data.results ?? []);
+      setTotal(data.total ?? 0);
+      setIndexed(data.indexed ?? 0);
+      setState("done");
+    } catch (e: any) {
+      setErr(e.message ?? "Search failed");
+      setState("error");
+    }
+  }
 
-  const q = filter.trim().toLowerCase();
-  const shown = q
-    ? properties.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.city ?? "").toLowerCase().includes(q) ||
-          (p.state ?? "").toLowerCase().includes(q)
-      )
-    : properties;
-
-  const totalPages = pagination?.total_pages ?? 1;
+  async function pick(id: number) {
+    if (busy || selectingId) return;
+    setSelectingId(id);
+    setErr("");
+    try {
+      const res = await fetch(`/api/properties?id=${id}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not load property");
+      await onSelect(data.property as VistaProperty);
+    } catch (e: any) {
+      setErr(e.message ?? "Could not load property");
+      setState("error");
+    } finally {
+      setSelectingId(null);
+    }
+  }
 
   return (
     <div>
-      <div className="row" style={{ alignItems: "flex-end" }}>
+      <form className="row" style={{ alignItems: "flex-end" }} onSubmit={doSearch}>
         <div className="grow">
-          <label className="small">Filter this page (by name or location)</label>
+          <label className="small">Search StayVista properties</label>
           <input
             type="text"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="e.g. Goa, Lonavala, villa name…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by villa name, city or state — e.g. Goa, Lonavala, Mulberry…"
           />
         </div>
-        {pagination && (
-          <span className="hint" style={{ margin: 0, whiteSpace: "nowrap" }}>
-            {pagination.total.toLocaleString()} properties · page {pagination.current_page} / {totalPages}
-          </span>
-        )}
-      </div>
+        <div style={{ display: "flex", alignItems: "flex-end" }}>
+          <button type="submit" disabled={state === "indexing" || state === "searching" || !q.trim()}>
+            {state === "indexing" ? "Indexing…" : state === "searching" ? "Searching…" : "Search"}
+          </button>
+        </div>
+      </form>
 
-      {state === "loading" && (
-        <div className="hint" style={{ marginTop: 14 }}>Loading properties from the StayVista API…</div>
+      {state === "indexing" && (
+        <div className="hint" style={{ marginTop: 12 }}>
+          Indexing the StayVista catalog — one-time, takes a few seconds. Later searches are instant.
+        </div>
       )}
+
       {state === "error" && (
-        <div className="error" style={{ marginTop: 14 }}>
+        <div className="error" style={{ marginTop: 12 }}>
           {err}
           {err.toLowerCase().includes("not configured") && (
             <div className="hint" style={{ marginTop: 6 }}>
@@ -92,57 +111,51 @@ export default function PropertyPicker({
 
       {state === "done" && (
         <>
-          <div className="picker-grid">
-            {shown.map((p) => (
-              <button
-                key={p.id}
-                className="picker-card"
-                onClick={() => onSelect(p)}
-                disabled={busy || p.photosCount === 0}
-                title={p.photosCount === 0 ? "No photos available" : `Analyze ${p.name}`}
-              >
-                <div className="picker-thumb">
-                  {p.thumbnail ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.thumbnail} alt="" loading="lazy" />
-                  ) : (
-                    <div className="picker-noimg">No photo</div>
-                  )}
-                  <span className="picker-count">{p.photosCount} 📷</span>
-                </div>
-                <div className="picker-body">
-                  <div className="picker-name">{p.name}</div>
-                  <div className="picker-loc">
-                    {[p.city, p.state].filter(Boolean).join(", ") || p.propertyType || "—"}
-                  </div>
-                </div>
-              </button>
-            ))}
-            {shown.length === 0 && (
-              <div className="hint">No properties match “{filter}” on this page.</div>
-            )}
+          <div className="hint" style={{ marginTop: 12 }}>
+            {total > 0
+              ? `${total.toLocaleString()} match${total === 1 ? "" : "es"}${
+                  total > results.length ? ` · showing first ${results.length}` : ""
+                } · searched ${indexed.toLocaleString()} properties`
+              : `No properties match “${q.trim()}”. Try a city or part of the villa name.`}
           </div>
 
-          <div className="picker-pager">
-            <button
-              className="ghost"
-              onClick={() => setPage((n) => Math.max(1, n - 1))}
-              disabled={page <= 1 || busy}
-            >
-              ← Prev
-            </button>
-            <span className="hint" style={{ margin: 0 }}>
-              Page {page} / {totalPages}
-            </span>
-            <button
-              className="ghost"
-              onClick={() => setPage((n) => Math.min(totalPages, n + 1))}
-              disabled={page >= totalPages || busy}
-            >
-              Next →
-            </button>
-          </div>
+          {results.length > 0 && (
+            <div className="picker-grid">
+              {results.map((p) => (
+                <button
+                  key={p.id}
+                  className="picker-card"
+                  onClick={() => pick(p.id)}
+                  disabled={busy || p.photosCount === 0 || selectingId !== null}
+                  title={p.photosCount === 0 ? "No photos available" : `Analyze ${p.name}`}
+                >
+                  <div className="picker-thumb">
+                    {p.thumbnail ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.thumbnail} alt="" loading="lazy" />
+                    ) : (
+                      <div className="picker-noimg">No photo</div>
+                    )}
+                    <span className="picker-count">{p.photosCount} 📷</span>
+                    {selectingId === p.id && <span className="picker-loading">Loading…</span>}
+                  </div>
+                  <div className="picker-body">
+                    <div className="picker-name">{p.name}</div>
+                    <div className="picker-loc">
+                      {[p.city, p.state].filter(Boolean).join(", ") || p.propertyType || "—"}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </>
+      )}
+
+      {state === "idle" && (
+        <div className="hint" style={{ marginTop: 12 }}>
+          Type a city or villa name and hit Search to pull live listings from the StayVista API.
+        </div>
       )}
     </div>
   );

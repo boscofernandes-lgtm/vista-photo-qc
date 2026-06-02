@@ -98,9 +98,18 @@ export function mapRawProperty(raw: any): VistaProperty {
   };
 }
 
-/** Convert a selected property's photos into analyzer inputs. */
-export function toImageInputs(p: VistaProperty): ImageInput[] {
-  return p.photos.map((ph, i) => ({
+/**
+ * Convert a selected property's photos into analyzer inputs. When `max` is set
+ * and the gallery is larger, photos are sampled EVENLY across the set (not just
+ * the first N) so coverage stays representative while keeping analysis fast.
+ */
+export function toImageInputs(p: VistaProperty, max?: number): ImageInput[] {
+  let photos = p.photos;
+  if (max && photos.length > max) {
+    const step = photos.length / max;
+    photos = Array.from({ length: max }, (_, i) => photos[Math.floor(i * step)]);
+  }
+  return photos.map((ph, i) => ({
     id: `vista-${p.id}-${i}`,
     src: proxied(ph.source),
     originalUrl: ph.source,

@@ -75,7 +75,8 @@ export default function Home() {
   async function onSelectProperty(p: VistaProperty) {
     setError("");
     setAnalyses(null);
-    const inputs = toImageInputs(p);
+    // Cap at 40 photos (evenly sampled) so large galleries still score fast.
+    const inputs = toImageInputs(p, 40);
     await run(inputs, toMeta(p));
   }
 

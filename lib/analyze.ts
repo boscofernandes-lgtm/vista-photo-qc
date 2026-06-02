@@ -99,20 +99,38 @@ export async function analyzeOne(input: ImageInput): Promise<ImageAnalysis> {
   return { input, cv, clip, scores, uncertain, flags };
 }
 
-/** Analyze a batch sequentially. CV always succeeds; classification degrades gracefully. */
+/**
+ * Analyze a batch with bounded concurrency. Running several images at once
+ * overlaps their network fetch + decode + CV, which is dramatically faster than
+ * the old one-at-a-time loop on large galleries. CV always succeeds;
+ * classification degrades gracefully. Results preserve input order.
+ */
 export async function analyzeBatch(
   inputs: ImageInput[],
-  onProgress?: (p: AnalyzeProgress) => void
+  onProgress?: (p: AnalyzeProgress) => void,
+  concurrency = 5
 ): Promise<ImageAnalysis[]> {
-  const results: ImageAnalysis[] = [];
-  for (let i = 0; i < inputs.length; i++) {
-    onProgress?.({ done: i, total: inputs.length, current: inputs[i].label });
-    try {
-      results.push(await analyzeOne(inputs[i]));
-    } catch {
-      // Only truly unreadable images (failed decode) are skipped.
+  const results: (ImageAnalysis | undefined)[] = new Array(inputs.length);
+  let next = 0;
+  let done = 0;
+
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= inputs.length) break;
+      try {
+        results[i] = await analyzeOne(inputs[i]);
+      } catch {
+        // Only truly unreadable images (failed decode) are skipped.
+      }
+      done++;
+      onProgress?.({ done, total: inputs.length, current: inputs[i].label });
     }
   }
+
+  onProgress?.({ done: 0, total: inputs.length });
+  const workers = Array.from({ length: Math.min(concurrency, inputs.length) }, () => worker());
+  await Promise.all(workers);
   onProgress?.({ done: inputs.length, total: inputs.length });
-  return results;
+  return results.filter((r): r is ImageAnalysis => r !== undefined);
 }
