@@ -55,7 +55,10 @@ export default function WeightsPanel({ weights, onChange }: Props) {
         <strong>Scoring weights</strong>
         <div className="row" style={{ alignItems: "center" }}>
           <span className="hint" style={{ margin: 0 }}>Max points: {total}</span>
-          <button className="ghost" onClick={() => onChange(DEFAULT_WEIGHTS)}>
+          <button
+            className="ghost"
+            onClick={() => onChange(JSON.parse(JSON.stringify(DEFAULT_WEIGHTS)) as Weights)}
+          >
             Reset
           </button>
         </div>

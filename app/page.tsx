@@ -19,7 +19,7 @@ export default function Home() {
   const [error, setError] = useState<string>("");
   const [meta, setMeta] = useState<PropertyMeta | null>(null);
   const [analyses, setAnalyses] = useState<ImageAnalysis[] | null>(null);
-  const [weights, setWeights] = useState<Weights>(DEFAULT_WEIGHTS);
+  const [weights, setWeights] = useState<Weights>(() => JSON.parse(JSON.stringify(DEFAULT_WEIGHTS)));
 
   const busy = status === "scraping" || status === "analyzing";
 
