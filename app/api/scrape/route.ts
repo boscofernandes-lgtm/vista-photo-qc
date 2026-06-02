@@ -77,10 +77,38 @@ export async function GET(req: NextRequest) {
     });
   };
 
-  // Hero / cover shots
-  for (const g of data?.mini_gallery ?? []) add(g?.src, "Gallery");
-  // Room-labelled space shots
-  for (const s of (data?.space ?? []) as SpaceItem[]) add(s?.image, s?.title);
+  // The page only embeds a 5-image preview (`mini_gallery`). The COMPLETE
+  // gallery — which matches the public `photos_count` — is served by v3api,
+  // keyed on the numeric property id. Pull that first so QC covers every shot.
+  const propertyId = detail?.id;
+  let galleryLoaded = false;
+  if (propertyId != null) {
+    try {
+      const gRes = await fetch(
+        `https://v3api.stayvista.com/api/property/${encodeURIComponent(String(propertyId))}/gallery`,
+        {
+          headers: { "User-Agent": "Mozilla/5.0 (compatible; VistaPhotoQC/1.0)" },
+          cache: "no-store",
+        }
+      );
+      if (gRes.ok) {
+        const photos = (await gRes.json())?.data?.photos;
+        if (Array.isArray(photos) && photos.length) {
+          for (const p of photos) add(p?.src, p?.tag ?? p?.categorization_tag);
+          galleryLoaded = true;
+        }
+      }
+    } catch {
+      // fall through to the embedded preview below
+    }
+  }
+
+  // Fallback: if the gallery endpoint is unavailable, QC whatever the page
+  // embeds — the 5-shot preview plus the room-labelled "space" photos.
+  if (!galleryLoaded) {
+    for (const g of data?.mini_gallery ?? []) add(g?.src, "Gallery");
+    for (const s of (data?.space ?? []) as SpaceItem[]) add(s?.image, s?.title);
+  }
 
   const meta = {
     name: detail.vista_name ?? "Unknown property",
