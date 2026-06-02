@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Vista Photo QC",
-  description: "Automated hospitality photography quality control & scoring",
+  title: "StayVista FrameCheck",
+  description: "Premium hospitality photography quality control & scoring for StayVista listings",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

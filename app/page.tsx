@@ -90,10 +90,9 @@ export default function Home() {
       <div className="topbar">
         <div className="brand">
           <div className="dot" />
-          <h1>Vista Photo QC</h1>
+          <h1>StayVista FrameCheck</h1>
         </div>
         <div className="cobrand">
-          <span className="cobrand-label">for</span>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/stayvista-logo.png" alt="StayVista" className="cobrand-logo" />
         </div>
