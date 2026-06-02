@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { analyzeBatch, AnalyzeProgress } from "@/lib/analyze";
-import { warmupClip } from "@/lib/clip";
 import { DEFAULT_WEIGHTS } from "@/lib/scoring";
 import { ImageAnalysis, ImageInput, PropertyMeta, Weights } from "@/lib/types";
 import WeightsPanel from "@/components/WeightsPanel";
@@ -21,7 +20,6 @@ export default function Home() {
   const [meta, setMeta] = useState<PropertyMeta | null>(null);
   const [analyses, setAnalyses] = useState<ImageAnalysis[] | null>(null);
   const [weights, setWeights] = useState<Weights>(DEFAULT_WEIGHTS);
-  const [warming, setWarming] = useState(false);
 
   const busy = status === "scraping" || status === "analyzing";
 
@@ -77,15 +75,6 @@ export default function Home() {
       source: "upload" as const,
     }));
     await run(inputs, { name: "Uploaded photo set" });
-  }
-
-  async function onWarmup() {
-    setWarming(true);
-    try {
-      await warmupClip();
-    } finally {
-      setWarming(false);
-    }
   }
 
   const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
@@ -149,12 +138,8 @@ export default function Home() {
 
         <div className="toolbar" style={{ margin: "14px 0 0" }}>
           <span className="hint" style={{ margin: 0 }}>
-            StayVista listings score instantly. Uploads of unlabeled photos use an
-            in-browser AI model (~150 MB) — pre-load it here so it&apos;s ready.
+            StayVista listings score instantly in your browser — no setup, no uploads, no model download.
           </span>
-          <button className="ghost" onClick={onWarmup} disabled={warming || busy}>
-            {warming ? "Warming up…" : "Pre-load AI model"}
-          </button>
         </div>
 
         {busy && (

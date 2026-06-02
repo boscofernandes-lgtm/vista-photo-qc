@@ -36,7 +36,40 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-.container { max-width: 1180px; margin: 0 auto; padding: 40px 24px 96px; }
+/* Subtle villa imagery behind everything — heavily darkened with the gold glow on
+   top so the premium black/gold theme and text stay crisp and readable while the
+   product feels hospitality-rich. Three properties fade in across the page. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1100px 560px at 74% -14%, rgba(60, 47, 22, 0.85) 0%, rgba(10, 9, 8, 0) 60%),
+    radial-gradient(900px 500px at 8% 120%, rgba(46, 36, 18, 0.85) 0%, rgba(10, 9, 8, 0) 55%),
+    linear-gradient(180deg, rgba(10, 9, 8, 0.80) 0%, rgba(10, 9, 8, 0.90) 50%, rgba(10, 9, 8, 0.97) 100%),
+    url("/bg/villa1.jpg");
+  background-size: cover, cover, cover, cover;
+  background-position: center, center, center, center 20%;
+  background-repeat: no-repeat;
+  filter: saturate(0.92);
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.16;
+  background:
+    linear-gradient(180deg, rgba(10, 9, 8, 0.55), rgba(10, 9, 8, 0.85)),
+    url("/bg/villa2.jpg") left -40px bottom -20px / 42% auto no-repeat,
+    url("/bg/villa3.jpg") right -40px top -20px / 42% auto no-repeat;
+  filter: blur(2px) saturate(0.9);
+}
+
+.container { max-width: 1180px; margin: 0 auto; padding: 40px 24px 96px; position: relative; z-index: 1; }
 
 /* ---- Header / brand ---- */
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
