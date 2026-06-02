@@ -8,11 +8,13 @@ import { AIRubricResult, ImageAnalysis, ImageInput, PropertyMeta, SubBrand, Weig
 import WeightsPanel from "@/components/WeightsPanel";
 import ScoreReport from "@/components/ScoreReport";
 import BrandAIControls from "@/components/BrandAIControls";
+import PropertyPicker from "@/components/PropertyPicker";
+import { VistaProperty, toImageInputs, toMeta } from "@/lib/vistaApi";
 
 type Status = "idle" | "scraping" | "analyzing" | "done" | "error";
 
 export default function Home() {
-  const [mode, setMode] = useState<"url" | "upload">("url");
+  const [mode, setMode] = useState<"browse" | "url" | "upload">("browse");
   const [url, setUrl] = useState(
     "https://www.stayvista.com/villa/the-stone-house-in-beze-2-bhk-villa-in-nashik-with-spacious-rooms"
   );
@@ -70,6 +72,13 @@ export default function Home() {
     }
   }
 
+  async function onSelectProperty(p: VistaProperty) {
+    setError("");
+    setAnalyses(null);
+    const inputs = toImageInputs(p);
+    await run(inputs, toMeta(p));
+  }
+
   async function onUpload(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError("");
@@ -104,6 +113,9 @@ export default function Home() {
 
       <div className="card pad">
         <div className="tabs">
+          <div className={`tab ${mode === "browse" ? "active" : ""}`} onClick={() => setMode("browse")}>
+            Browse StayVista
+          </div>
           <div className={`tab ${mode === "url" ? "active" : ""}`} onClick={() => setMode("url")}>
             From StayVista URL
           </div>
@@ -112,7 +124,9 @@ export default function Home() {
           </div>
         </div>
 
-        {mode === "url" ? (
+        {mode === "browse" ? (
+          <PropertyPicker onSelect={onSelectProperty} busy={busy} />
+        ) : mode === "url" ? (
           <div className="row">
             <div className="grow">
               <label className="small">StayVista villa URL</label>
