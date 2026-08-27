@@ -112,7 +112,7 @@ export default function BrandAIControls({
 
       <div className="hint" style={{ marginTop: 12 }}>
         {aiMode === "hybrid"
-          ? "Hybrid: Gemini scores Cover, Set-ups & Lifestyle (styling/content); CV scores Lighting, Angles & Edits."
+          ? "Hybrid: OpenAI scores Cover, Set-ups & Lifestyle (styling/content); CV scores Lighting, Angles & Edits."
           : "Full: Gemini re-scores all six rubric categories; the in-browser CV score stays as a cross-check."}
       </div>
 
@@ -126,7 +126,7 @@ export default function BrandAIControls({
           {err}
           {err.toLowerCase().includes("not configured") && (
             <div className="hint" style={{ marginTop: 6 }}>
-              Add <code>GEMINI_API_KEY</code> in your Vercel project settings → Environment Variables, then redeploy.
+              Add <code>OPENAI_API_KEY</code> in your Vercel project settings → Environment Variables, then redeploy.
             </div>
           )}
         </div>
