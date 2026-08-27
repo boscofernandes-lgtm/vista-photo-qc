@@ -3,7 +3,7 @@
 import { AIRubricResult, ImageAnalysis, ShotCategory, SubBrand } from "./types";
 import { brandProfile } from "./brands";
 
-/** Downscale an image to a small JPEG data URL to keep the Gemini payload light. */
+/** Downscale an image to a small JPEG data URL to keep the AI payload light. */
 function toSmallDataUrl(src: string, maxEdge = 512, quality = 0.7): Promise<string | null> {
   return new Promise((resolve) => {
     const img = new Image();
@@ -42,7 +42,7 @@ export interface AIRubricError {
 }
 
 /**
- * Run the optional Gemini rubric pass. Sends downscaled photos to our own API
+ * Run the optional AI rubric pass. Sends downscaled photos to our own API
  * route (which holds the key server-side) and returns 1–5 category scores.
  */
 export async function runAIRubric(

@@ -33,6 +33,12 @@ const MODELS: string[] = Array.from(
 /** "auto" | "low" | "high" — photos are already downscaled to 512px client-side. */
 const IMAGE_DETAIL = process.env.OPENROUTER_IMAGE_DETAIL || "auto";
 
+/** Shared by reasoning + visible output, so this is not just the JSON's size. */
+const MAX_TOKENS = Number(process.env.OPENROUTER_MAX_TOKENS) || 8000;
+
+/** Scoring is a judgement call, not a puzzle — "low" is plenty and much faster. */
+const REASONING_EFFORT = process.env.OPENROUTER_REASONING_EFFORT || "low";
+
 /** Optional attribution shown on OpenRouter's dashboard/leaderboards. */
 const SITE_URL = process.env.OPENROUTER_SITE_URL || "https://vista-photo-qc.vercel.app";
 const SITE_TITLE = "StayVista Photo QC";
@@ -178,10 +184,16 @@ export async function POST(req: NextRequest) {
         schema: buildSchema(mode),
       },
     },
-    // Only route to providers that actually honour response_format.
+    // Only route to providers that actually honour response_format. NOTE: this
+    // filters on EVERY parameter present, so never add one the model rejects
+    // (e.g. temperature — no GPT-5.x endpoint accepts it) or zero providers match
+    // and the call fails before inference with a misleading "no endpoints" error.
     provider: { require_parameters: true },
-    max_tokens: 2000,
-    temperature: 0.2,
+    // Reasoning is on by default on GPT-5.x and its tokens are billed against
+    // this budget, so leave generous headroom or the JSON gets truncated
+    // (finish_reason "length") and content comes back empty.
+    max_tokens: MAX_TOKENS,
+    reasoning: { effort: REASONING_EFFORT },
   };
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -254,7 +266,7 @@ export async function POST(req: NextRequest) {
     if (lastStatus === 403 || lastStatus === 404) {
       return NextResponse.json(
         {
-          error: `OpenRouter refused model "${MODELS.join('", "')}"${msg ? `: ${msg}` : ""}. Check the key's allowed models, or set OPENROUTER_MODEL.`,
+          error: `OpenRouter refused model "${MODELS.join('", "')}"${msg ? `: ${msg}` : ""}. Usually an unsupported parameter in the payload (require_parameters drops every provider that lacks one) rather than the key — otherwise check the key's allowed models, or set OPENROUTER_MODEL.`,
         },
         { status: 502 }
       );

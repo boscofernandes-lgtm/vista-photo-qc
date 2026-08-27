@@ -102,7 +102,7 @@ export default function BrandAIControls({
         <div>
           <button onClick={onRunAI} disabled={state === "running"}>
             {state === "running"
-              ? "Scoring with Gemini…"
+              ? "Scoring with AI…"
               : ai
               ? "Re-run AI score"
               : "Run AI rubric score"}
@@ -112,13 +112,13 @@ export default function BrandAIControls({
 
       <div className="hint" style={{ marginTop: 12 }}>
         {aiMode === "hybrid"
-          ? "Hybrid: OpenAI scores Cover, Set-ups & Lifestyle (styling/content); CV scores Lighting, Angles & Edits."
-          : "Full: Gemini re-scores all six rubric categories; the in-browser CV score stays as a cross-check."}
+          ? "Hybrid: AI scores Cover, Set-ups & Lifestyle (styling/content); CV scores Lighting, Angles & Edits."
+          : "Full: AI re-scores all six rubric categories; the in-browser CV score stays as a cross-check."}
       </div>
 
       {state === "done" && ai && (
         <div className="ai-summary">
-          <span className="ai-badge">Gemini · {ai.mode}</span> {ai.summary}
+          <span className="ai-badge">AI · {ai.mode}</span> {ai.summary}
         </div>
       )}
       {state === "error" && (
