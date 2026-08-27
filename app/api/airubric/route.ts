@@ -1,46 +1,53 @@
 import { NextRequest, NextResponse } from "next/server";
- 
+
 export const runtime = "nodejs";
 export const maxDuration = 60;
- 
+
 /**
- * OpenAI-powered rubric scoring. Holds the key server-side (never sent to the
- * browser) as the OPENAI_API_KEY environment variable on Vercel.
+ * OpenRouter-powered rubric scoring. Holds the key server-side (never sent to
+ * the browser) as OPENROUTER_API_KEY (OPENAI_API_KEY is accepted as a fallback
+ * name so an existing Vercel variable keeps working).
+ *
+ * OpenRouter exposes an OpenAI-compatible Chat Completions API — note this is
+ * NOT api.openai.com, and model IDs are namespaced ("openai/gpt-5.6-luna").
  *
  * Request body: { brand, mode, brandVibe, threshold, images: [{label, category, dataUrl}] }
  * Response: { mode, categories: { <cat>: { score 1-5, reason } }, summary }
  */
- 
-const OPENAI_ENDPOINT = "https://api.openai.com/v1/responses";
- 
+
+const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+
 /**
- * Model fallback chain. OPENAI_MODEL (if set) is tried first; the rest are
- * appended as fallbacks (deduped). Unlike Gemini's per-model free quotas, an
- * OpenAI key shares one org-wide quota — so the chain mainly guards against a
- * model ID being unavailable on your account, not against quota exhaustion.
+ * Model fallback chain. OPENROUTER_MODEL (if set) is tried first. Keys can be
+ * restricted to specific models, so keep this list to models the key allows —
+ * a disallowed model costs a wasted round trip.
  */
 const MODELS: string[] = Array.from(
   new Set(
-    [process.env.OPENAI_MODEL, "gpt-5.6-luna", "gpt-5.6-terra", "gpt-4o-mini"].filter(
+    [process.env.OPENROUTER_MODEL, process.env.OPENAI_MODEL, "openai/gpt-5.6-luna"].filter(
       (m): m is string => !!m
     )
   )
 );
- 
+
 /** "auto" | "low" | "high" — photos are already downscaled to 512px client-side. */
-const IMAGE_DETAIL = process.env.OPENAI_IMAGE_DETAIL || "auto";
- 
+const IMAGE_DETAIL = process.env.OPENROUTER_IMAGE_DETAIL || "auto";
+
+/** Optional attribution shown on OpenRouter's dashboard/leaderboards. */
+const SITE_URL = process.env.OPENROUTER_SITE_URL || "https://vista-photo-qc.vercel.app";
+const SITE_TITLE = "StayVista Photo QC";
+
 type Mode = "hybrid" | "full";
- 
+
 interface ReqImage {
   label?: string;
   category?: string;
   dataUrl: string; // data:image/jpeg;base64,....
 }
- 
+
 const HYBRID_CATS = ["cover", "setups", "lifestyle"] as const;
 const FULL_CATS = ["cover", "setups", "lifestyle", "lighting", "angles", "edits"] as const;
- 
+
 const RUBRIC: Record<string, string> = {
   cover:
     "Cover & Facade — the hero shot. 5 = golden hour, dramatic sky, cinematic depth, clean forecourt, no vehicles. 1 = dark, blurry, bad angle, clutter blocking.",
@@ -55,7 +62,7 @@ const RUBRIC: Record<string, string> = {
   edits:
     "Edits — post-processing. 5 = professional HDR grade, warm tone, lifted shadows, natural colour, crisp & clean, straight verticals. 1 = raw/unprocessed or heavily filtered, wrong white balance.",
 };
- 
+
 function buildPrompt(brandName: string, brandVibe: string, mode: Mode): string {
   const cats = (mode === "full" ? FULL_CATS : HYBRID_CATS).map((c) => `- ${c}: ${RUBRIC[c]}`).join("\n");
   return [
@@ -71,7 +78,7 @@ function buildPrompt(brandName: string, brandVibe: string, mode: Mode): string {
     `Keep every "reason" to at most 18 words and the "summary" to one sentence of at most 30 words.`,
   ].join("\n");
 }
- 
+
 /** Strict JSON schema for the response, built per mode so keys are fixed. */
 function buildSchema(mode: Mode) {
   const cats = mode === "full" ? FULL_CATS : HYBRID_CATS;
@@ -82,8 +89,8 @@ function buildSchema(mode: Mode) {
       additionalProperties: false,
       required: ["score", "reason"],
       properties: {
-        score: { type: "integer", minimum: 1, maximum: 5 },
-        reason: { type: "string" },
+        score: { type: "integer", minimum: 1, maximum: 5, description: "Whole number 1-5." },
+        reason: { type: "string", description: "At most 18 words." },
       },
     };
   }
@@ -98,129 +105,115 @@ function buildSchema(mode: Mode) {
         required: [...cats],
         properties: catProps,
       },
-      summary: { type: "string" },
+      summary: { type: "string", description: "One sentence, at most 30 words." },
     },
   };
 }
- 
+
 function isImageDataUrl(dataUrl: string): boolean {
   return /^data:image\/[a-zA-Z0-9.+-]+;base64,.+$/.test(dataUrl);
 }
- 
-/** Pull the assistant text out of a raw Responses API payload. */
-function extractText(res: {
-  output_text?: string;
-  output?: Array<{ type?: string; content?: Array<{ type?: string; text?: string; refusal?: string }> }>;
-}): { text?: string; refusal?: string } {
-  if (typeof res.output_text === "string" && res.output_text.trim()) {
-    return { text: res.output_text };
-  }
-  let text = "";
-  let refusal = "";
-  for (const item of res.output ?? []) {
-    for (const part of item.content ?? []) {
-      if (part.type === "output_text" && part.text) text += part.text;
-      if (part.type === "refusal" && part.refusal) refusal += part.refusal;
-    }
-  }
-  return { text: text || undefined, refusal: refusal || undefined };
+
+/** OpenRouter sometimes reports failures as HTTP 200 with an error body. */
+function bodyError(json: { error?: { message?: string; code?: number | string } }): string | undefined {
+  const m = json?.error?.message;
+  return m ? String(m) : undefined;
 }
- 
+
 export async function POST(req: NextRequest) {
-  const key = process.env.OPENAI_API_KEY;
+  const key = (process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY)?.trim();
   if (!key) {
     return NextResponse.json(
-      { error: "AI scoring is not configured. Set OPENAI_API_KEY in the environment." },
+      { error: "AI scoring is not configured. Set OPENROUTER_API_KEY in the environment." },
       { status: 501 }
     );
   }
- 
+
   let body: { brand?: string; brandName?: string; brandVibe?: string; mode?: Mode; images?: ReqImage[] };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
- 
+
   const mode: Mode = body.mode === "full" ? "full" : "hybrid";
   const images = Array.isArray(body.images) ? body.images : [];
   if (images.length === 0) {
     return NextResponse.json({ error: "No images supplied" }, { status: 400 });
   }
- 
+
   // Cap images to keep token cost + latency bounded; sample evenly across the set.
-  const MAX = Number(process.env.OPENAI_MAX_IMAGES) || 8;
+  const MAX = Number(process.env.OPENROUTER_MAX_IMAGES) || 8;
   let sample = images;
   if (images.length > MAX) {
     const step = images.length / MAX;
     sample = Array.from({ length: MAX }, (_, i) => images[Math.floor(i * step)]);
   }
- 
+
   const content: object[] = [
-    { type: "input_text", text: buildPrompt(body.brandName || "StayVista Villas", body.brandVibe || "", mode) },
+    { type: "text", text: buildPrompt(body.brandName || "StayVista Villas", body.brandVibe || "", mode) },
   ];
   for (const im of sample) {
     if (!isImageDataUrl(im.dataUrl)) continue;
     if (im.label || im.category) {
       content.push({
-        type: "input_text",
+        type: "text",
         text: `Photo — label: ${im.label ?? "?"}, detected type: ${im.category ?? "?"}`,
       });
     }
-    content.push({ type: "input_image", image_url: im.dataUrl, detail: IMAGE_DETAIL });
+    content.push({ type: "image_url", image_url: { url: im.dataUrl, detail: IMAGE_DETAIL } });
   }
- 
+
   if (content.length === 1) {
     return NextResponse.json({ error: "No readable images in request" }, { status: 400 });
   }
- 
+
   const basePayload = {
-    input: [{ role: "user", content }],
-    text: {
-      format: {
-        type: "json_schema",
+    messages: [{ role: "user", content }],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
         name: "stayvista_photo_rubric",
         strict: true,
         schema: buildSchema(mode),
       },
     },
-    max_output_tokens: 2000,
+    // Only route to providers that actually honour response_format.
+    provider: { require_parameters: true },
+    max_tokens: 2000,
+    temperature: 0.2,
   };
- 
+
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
- 
-  // Try each model in the fallback chain. Within a model, retry transient
-  // rate-limit (429) / overload (5xx) with exponential backoff, honoring
-  // Retry-After. A hard quota error moves on to the next model.
+
   let aiRes: Response | null = null;
   let lastBody = "";
   let lastStatus = 502;
   const MAX_TRIES = 3;
- 
+
   outer: for (const model of MODELS) {
     for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
       try {
-        aiRes = await fetch(OPENAI_ENDPOINT, {
+        aiRes = await fetch(OPENROUTER_ENDPOINT, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${key}`,
+            "HTTP-Referer": SITE_URL,
+            "X-Title": SITE_TITLE,
           },
           body: JSON.stringify({ model, ...basePayload }),
         });
       } catch (e) {
-        return NextResponse.json({ error: `Could not reach OpenAI: ${(e as Error).message}` }, { status: 502 });
+        return NextResponse.json({ error: `Could not reach OpenRouter: ${(e as Error).message}` }, { status: 502 });
       }
- 
+
       if (aiRes.ok) break outer;
- 
+
       lastBody = await aiRes.text().catch(() => "");
       lastStatus = aiRes.status;
- 
-      // Hard billing/quota failure — retrying or switching model won't help.
-      if (lastBody.includes("insufficient_quota")) break outer;
- 
-      // 429 rate limit or 5xx overload → back off and retry the same model.
+
+      // 429 rate limit or 5xx → back off and retry the same model.
       if ((aiRes.status === 429 || aiRes.status >= 500) && attempt < MAX_TRIES - 1) {
         const retryAfter = Number(aiRes.headers.get("retry-after"));
         const waitMs =
@@ -228,75 +221,88 @@ export async function POST(req: NextRequest) {
         await sleep(Math.min(waitMs, 6000));
         continue;
       }
- 
-      // 400/404 usually means this model ID isn't available on the account → try next.
-      if (aiRes.status === 400 || aiRes.status === 404) break;
- 
+
+      // 400/403/404 — model not permitted for this key, or unavailable → try next.
+      if (aiRes.status === 400 || aiRes.status === 403 || aiRes.status === 404) break;
+
       break outer;
     }
   }
- 
+
   if (!aiRes || !aiRes.ok) {
-    if (lastBody.includes("insufficient_quota")) {
-      return NextResponse.json(
-        {
-          error:
-            "OpenAI reports no remaining credit on this key. Add a payment method / top up credits at platform.openai.com/settings/organization/billing, then retry.",
-          detail: lastBody.slice(0, 300),
-        },
-        { status: 429 }
-      );
+    let msg = "";
+    try {
+      msg = JSON.parse(lastBody)?.error?.message ?? "";
+    } catch {
+      /* non-JSON body */
     }
     if (lastStatus === 401) {
       return NextResponse.json(
-        { error: "OpenAI rejected the API key (401). Check OPENAI_API_KEY in Vercel and redeploy.", detail: lastBody.slice(0, 300) },
+        {
+          error: `OpenRouter rejected the API key (401)${msg ? `: ${msg}` : ""}. Keys start with sk-or-v1-.`,
+          keyShape: `len=${key.length} prefix=${key.slice(0, 10)}`,
+        },
         { status: 401 }
+      );
+    }
+    if (lastStatus === 402) {
+      return NextResponse.json(
+        { error: `OpenRouter reports insufficient credits${msg ? `: ${msg}` : ""}. Top up at openrouter.ai/credits.` },
+        { status: 402 }
+      );
+    }
+    if (lastStatus === 403 || lastStatus === 404) {
+      return NextResponse.json(
+        {
+          error: `OpenRouter refused model "${MODELS.join('", "')}"${msg ? `: ${msg}` : ""}. Check the key's allowed models, or set OPENROUTER_MODEL.`,
+        },
+        { status: 502 }
       );
     }
     if (lastStatus === 429) {
       return NextResponse.json(
-        {
-          error:
-            "OpenAI rate limit hit. New keys start on a low tier — wait a moment and retry, or reduce the number of photos scored.",
-          detail: lastBody.slice(0, 300),
-        },
+        { error: `OpenRouter rate limit hit${msg ? `: ${msg}` : ""}. Retry shortly or score fewer photos.` },
         { status: 429 }
       );
     }
     return NextResponse.json(
-      { error: `OpenAI error ${lastStatus}`, detail: lastBody.slice(0, 400) },
+      { error: `OpenRouter error ${lastStatus}${msg ? `: ${msg}` : ""}`, detail: lastBody.slice(0, 400) },
       { status: 502 }
     );
   }
- 
+
   const raw = await aiRes.json();
-  const { text, refusal } = extractText(raw);
- 
-  if (refusal && !text) {
-    return NextResponse.json({ error: `Model refused: ${refusal.slice(0, 200)}` }, { status: 502 });
+
+  // A 200 can still carry an error payload.
+  const inlineErr = bodyError(raw);
+  if (inlineErr) {
+    return NextResponse.json({ error: `OpenRouter: ${inlineErr}` }, { status: 502 });
   }
+
+  const choice = raw?.choices?.[0];
+  const text: string | undefined = choice?.message?.content ?? undefined;
   if (!text) {
-    const incomplete = raw?.incomplete_details?.reason;
+    const reason = choice?.finish_reason || choice?.native_finish_reason;
     return NextResponse.json(
-      { error: incomplete ? `Empty response from OpenAI (${incomplete})` : "Empty response from OpenAI" },
+      { error: reason ? `Empty response from OpenRouter (${reason})` : "Empty response from OpenRouter" },
       { status: 502 }
     );
   }
- 
+
   let parsed: { categories?: Record<string, { score: number; reason: string }>; summary?: string };
   try {
     parsed = JSON.parse(text);
   } catch {
     // Belt-and-braces: strict schema should prevent this, but extract the first {...} block.
     const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return NextResponse.json({ error: "OpenAI did not return JSON", raw: text.slice(0, 400) }, { status: 502 });
+    if (!m) return NextResponse.json({ error: "Model did not return JSON", raw: text.slice(0, 400) }, { status: 502 });
     try {
       parsed = JSON.parse(m[0]);
     } catch {
-      return NextResponse.json({ error: "OpenAI JSON parse failed", raw: text.slice(0, 400) }, { status: 502 });
+      return NextResponse.json({ error: "JSON parse failed", raw: text.slice(0, 400) }, { status: 502 });
     }
   }
- 
+
   // Sanitise: keep only allowed categories, clamp scores to whole 1-5.
   const allowed = mode === "full" ? FULL_CATS : HYBRID_CATS;
   const categories: Record<string, { score: number; reason: string }> = {};
@@ -309,6 +315,6 @@ export async function POST(req: NextRequest) {
       };
     }
   }
- 
+
   return NextResponse.json({ mode, categories, summary: String(parsed.summary ?? "").slice(0, 240) });
 }
