@@ -114,7 +114,7 @@ export interface CompetitorBenchmark {
   note: string;
 }
 
-/** Result of the optional Gemini rubric pass. */
+/** Result of the optional OpenAI rubric pass. */
 export interface AIRubricResult {
   mode: "hybrid" | "full";
   categories: Partial<
@@ -153,7 +153,7 @@ export interface PropertyScore {
   pass: boolean;
   /** True when one or more categories were scored by the AI rubric pass. */
   aiAssisted: boolean;
-  /** Short AI summary, when the Gemini pass ran. */
+  /** Short AI summary, when the OpenAI pass ran. */
   aiSummary?: string;
 }
 
