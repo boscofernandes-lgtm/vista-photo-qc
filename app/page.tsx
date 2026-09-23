@@ -9,12 +9,13 @@ import WeightsPanel from "@/components/WeightsPanel";
 import ScoreReport from "@/components/ScoreReport";
 import BrandAIControls from "@/components/BrandAIControls";
 import PropertyPicker from "@/components/PropertyPicker";
+import BulkRunner from "@/components/BulkRunner";
 import { VistaProperty, toImageInputs, toMeta } from "@/lib/vistaApi";
 
 type Status = "idle" | "scraping" | "analyzing" | "done" | "error";
 
 export default function Home() {
-  const [mode, setMode] = useState<"browse" | "url" | "upload">("browse");
+  const [mode, setMode] = useState<"browse" | "url" | "upload" | "bulk">("browse");
   const [url, setUrl] = useState(
     "https://www.stayvista.com/villa/the-stone-house-in-beze-2-bhk-villa-in-nashik-with-spacious-rooms"
   );
@@ -123,6 +124,9 @@ export default function Home() {
           <div className={`tab ${mode === "upload" ? "active" : ""}`} onClick={() => setMode("upload")}>
             Upload photos
           </div>
+          <div className={`tab ${mode === "bulk" ? "active" : ""}`} onClick={() => setMode("bulk")}>
+            Bulk QC
+          </div>
         </div>
 
         {mode === "browse" ? (
@@ -144,7 +148,7 @@ export default function Home() {
               </button>
             </div>
           </div>
-        ) : (
+        ) : mode === "upload" ? (
           <div>
             <label className="small">Select property photos</label>
             <input
@@ -155,13 +159,17 @@ export default function Home() {
               disabled={busy}
             />
           </div>
+        ) : (
+          <BulkRunner />
         )}
 
-        <div className="toolbar" style={{ margin: "14px 0 0" }}>
-          <span className="hint" style={{ margin: 0 }}>
-            StayVista listings score instantly in your browser — no setup, no uploads, no model download.
-          </span>
-        </div>
+        {mode !== "bulk" && (
+          <div className="toolbar" style={{ margin: "14px 0 0" }}>
+            <span className="hint" style={{ margin: 0 }}>
+              StayVista listings score instantly in your browser — no setup, no uploads, no model download.
+            </span>
+          </div>
+        )}
 
         {busy && (
           <div style={{ marginTop: 16 }}>
