@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isVideoUrl } from "@/lib/vistaApi";
 
 export const runtime = "nodejs";
 
@@ -63,17 +64,22 @@ export async function GET(req: NextRequest) {
 
   const detail = data?.property_detail ?? {};
   const seen = new Set<string>();
-  const images: { id: string; src: string; originalUrl: string; label?: string }[] = [];
+  const images: { id: string; src: string; originalUrl: string; label?: string; listingIndex: number }[] = [];
+  let position = 0;
 
   const add = (url: unknown, label?: string) => {
     if (typeof url !== "string" || !url.includes(IMG_HOST)) return;
     if (seen.has(url)) return;
     seen.add(url);
+    // Videos keep their slot in the gallery numbering but can't be photo-checked.
+    const listingIndex = position++;
+    if (isVideoUrl(url)) return;
     images.push({
-      id: `img-${images.length}`,
+      id: `img-${listingIndex}`,
       src: proxied(url),
       originalUrl: url,
       label,
+      listingIndex,
     });
   };
 

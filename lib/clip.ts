@@ -40,10 +40,12 @@ export function categoryFromLabel(label?: string): ShotCategory | null {
   if (/facade|exterior|elevation|entrance|front|outside|building|aerial|drone|porch/.test(s))
     return "cover_facade";
 
-  // Lifestyle — outdoor amenities & experiences (checked before interiors so an
-  // "outdoor sitting area" is lifestyle, not a generic "sitting" interior).
+  // Lifestyle — outdoor amenities, experiences and service (the rubric's
+  // "Service, Guest, Experiences": a villa attendant shot counts here). Checked
+  // before interiors so an "outdoor sitting area" is lifestyle, not a generic
+  // "sitting" interior.
   if (
-    /pool|jacuzzi|hot ?tub|plunge|lawn|garden|outdoor|out ?door|al ?fresco|deck|terrace|balcony|patio|courtyard|gazebo|sit-?out|view|lake|river|beach|sunset|bonfire|fire ?pit|campfire|barbe|bbq|grill|spa|sauna|gym|game|play|amenit|experience|lifestyle/.test(
+    /pool|jacuzzi|hot ?tub|plunge|lawn|garden|outdoor|out ?door|al ?fresco|deck|terrace|balcony|patio|courtyard|gazebo|sit-?out|view|lake|river|beach|sunset|bonfire|fire ?pit|campfire|barbe|bbq|grill|spa|sauna|gym|fitness|game|play|amenit|experience|lifestyle|attendant|caretaker|butler|chef|service/.test(
       s
     )
   )
@@ -51,7 +53,7 @@ export function categoryFromLabel(label?: string): ShotCategory | null {
 
   // Set ups — interiors & food/drink styling.
   if (
-    /bed|living|kitchen|bath|wash|dining|dinning|food|drink|breakfast|meal|cafe|pantry|hall|room|interior|indoor|lounge|sitting|seating|study|kids|master|suite|foyer|stair/.test(
+    /bed|living|kitchen|bath|wash|dining|dinning|food|drink|breakfast|meal|cafe|pantry|hall|room|interior|indoor|lounge|sitting|seating|study|kids|master|suite|foyer|stair|passage|corridor|lobby/.test(
       s
     )
   )

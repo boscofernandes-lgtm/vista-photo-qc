@@ -42,9 +42,18 @@ const COVERAGE_TARGET: Record<Exclude<ShotCategory, "other">, number> = {
   lifestyle: 2,
 };
 
+/**
+ * Grade band for a /100 score. Bands are written as whole numbers (60–75,
+ * 76–89…), so a fractional score like 75.4 sits between two of them; take the
+ * highest band whose minimum it reaches, so it can never fall through to the
+ * bottom band.
+ */
 export function gradeFor(score100: number): GradeBand {
   const s = Math.max(0, Math.min(100, score100));
-  return GRADE_BANDS.find((b) => s >= b.min && s <= b.max) ?? GRADE_BANDS[0];
+  for (let i = GRADE_BANDS.length - 1; i >= 0; i--) {
+    if (s >= GRADE_BANDS[i].min) return GRADE_BANDS[i];
+  }
+  return GRADE_BANDS[0];
 }
 
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
@@ -225,7 +234,10 @@ export function scoreProperty(
   const bandSum = subScores.reduce((a, s) => a + s.band, 0);
   const banded100 = (bandSum / (subScores.length * 5)) * 100;
 
-  const band = gradeFor(total100);
+  // Grade and pass/fail both use the score as displayed, so a villa shown as 76
+  // can't be graded as a 60–75 band (or fall between bands).
+  const shown100 = Math.round(total100);
+  const band = gradeFor(shown100);
   const threshold = profile.minScore;
 
   // ---- Reshoot list: images dragging the score down ----
@@ -242,7 +254,7 @@ export function scoreProperty(
 
   return {
     total30: earned,
-    total100: Math.round(total100),
+    total100: shown100,
     banded100: Math.round(banded100),
     grade: band.grade,
     solution: band.solution,
@@ -253,7 +265,7 @@ export function scoreProperty(
     imageCount: analyses.length,
     brand,
     threshold,
-    pass: Math.round(total100) >= threshold,
+    pass: shown100 >= threshold,
     aiAssisted: Object.keys(aiCats).length > 0,
     aiSummary: opts.ai?.summary,
   };

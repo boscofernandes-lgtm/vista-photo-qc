@@ -160,6 +160,7 @@ export default function BulkRunner() {
           originalUrl: im.originalUrl,
           label: im.label,
           source: "url" as const,
+          listingIndex: typeof im.listingIndex === "number" ? im.listingIndex : undefined,
         }));
         const sampled = evenSample(inputs, PHOTO_CAP);
         if (sampled.length === 0) throw new Error("No readable photos on this listing.");
