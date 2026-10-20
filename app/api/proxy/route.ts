@@ -31,7 +31,10 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": upstream.headers.get("content-type") ?? "image/jpeg",
-        "Cache-Control": "public, max-age=3600",
+        // Gallery file names are content-hashed, so a photo never changes under
+        // the same URL: let Vercel's edge cache it for a day so flipping through
+        // villa galleries doesn't re-fetch every image through this function.
+        "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
         "Access-Control-Allow-Origin": "*",
       },
     });

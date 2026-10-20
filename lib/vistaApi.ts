@@ -22,6 +22,8 @@ export interface VistaPhoto {
   /** Room/space label, e.g. "Swimming Pool", "Bedroom 1" — may be null. */
   tag: string | null;
   order: number;
+  /** Galleries mix in short videos (.mp4); those can't be photo-checked. */
+  kind: "image" | "video";
 }
 
 export interface VistaAmenity {
@@ -39,9 +41,12 @@ export interface VistaProperty {
   propertyType?: string;
   rooms?: number;
   maxOccupancy?: number;
+  /** Still photos only — videos are counted separately. */
   photosCount: number;
+  videoCount: number;
   /** Proxied first photo, for list thumbnails. */
   thumbnail?: string;
+  /** The full gallery in listing order, photos and videos. */
   photos: VistaPhoto[];
   amenities: VistaAmenity[];
 }
@@ -63,6 +68,11 @@ export function proxied(url: string): string {
   return `/api/proxy?u=${encodeURIComponent(url)}`;
 }
 
+/** Gallery entries that are videos, not photos (they fail to decode as images). */
+export function isVideoUrl(url: string): boolean {
+  return /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(url);
+}
+
 /** Map one raw Vista API property object into our trimmed shape (server-side). */
 export function mapRawProperty(raw: any): VistaProperty {
   const photos: VistaPhoto[] = Array.isArray(raw?.photos)
@@ -72,9 +82,11 @@ export function mapRawProperty(raw: any): VistaProperty {
           source: ph.source as string,
           tag: ph?.tag ?? null,
           order: typeof ph?.order === "number" ? ph.order : 0,
+          kind: isVideoUrl(ph.source) ? "video" : "image",
         }))
         .sort((a: VistaPhoto, b: VistaPhoto) => a.order - b.order)
     : [];
+  const stills = photos.filter((ph) => ph.kind === "image");
 
   const amenities: VistaAmenity[] = Array.isArray(raw?.amenities)
     ? raw.amenities
@@ -91,30 +103,44 @@ export function mapRawProperty(raw: any): VistaProperty {
     propertyType: raw?.property_type ?? undefined,
     rooms: typeof raw?.rooms === "number" ? raw.rooms : undefined,
     maxOccupancy: typeof raw?.max_occupancy === "number" ? raw.max_occupancy : undefined,
-    photosCount: photos.length,
-    thumbnail: photos[0] ? proxied(photos[0].source) : undefined,
+    photosCount: stills.length,
+    videoCount: photos.length - stills.length,
+    thumbnail: stills[0] ? proxied(stills[0].source) : undefined,
     photos,
     amenities,
   };
 }
 
+/** Photos at the front of the gallery that are always checked: guests see these first. */
+const ALWAYS_CHECK_FIRST = 8;
+
 /**
- * Convert a selected property's photos into analyzer inputs. When `max` is set
- * and the gallery is larger, photos are sampled EVENLY across the set (not just
- * the first N) so coverage stays representative while keeping analysis fast.
+ * Convert a selected property's photos into analyzer inputs. Videos are left
+ * out (they can't be photo-checked). When `max` is set and the gallery is
+ * larger, the first few photos (the cover and what guests see first) are always
+ * included and the remaining slots are spread EVENLY over the rest, so coverage
+ * stays representative while keeping analysis fast. Each input keeps its
+ * position in the full gallery so reports can name the real photo number.
  */
 export function toImageInputs(p: VistaProperty, max?: number): ImageInput[] {
-  let photos = p.photos;
-  if (max && photos.length > max) {
-    const step = photos.length / max;
-    photos = Array.from({ length: max }, (_, i) => photos[Math.floor(i * step)]);
+  // Older cached payloads may lack `kind`; fall back to the URL check.
+  let stills = p.photos
+    .map((ph, listingIndex) => ({ ph, listingIndex }))
+    .filter(({ ph }) => (ph.kind ?? (isVideoUrl(ph.source) ? "video" : "image")) === "image");
+  if (max && stills.length > max) {
+    const head = stills.slice(0, Math.min(ALWAYS_CHECK_FIRST, max));
+    const rest = stills.slice(head.length);
+    const slots = max - head.length;
+    const step = rest.length / slots;
+    stills = [...head, ...Array.from({ length: slots }, (_, i) => rest[Math.floor(i * step)])];
   }
-  return photos.map((ph, i) => ({
-    id: `vista-${p.id}-${i}`,
+  return stills.map(({ ph, listingIndex }) => ({
+    id: `vista-${p.id}-${listingIndex}`,
     src: proxied(ph.source),
     originalUrl: ph.source,
     label: ph.tag ?? undefined,
     source: "url" as const,
+    listingIndex,
   }));
 }
 

@@ -9,6 +9,11 @@ export interface ImageInput {
   /** Room/space label from StayVista page data, when available. */
   label?: string;
   source: SourceKind;
+  /**
+   * 0-based position in the listing's full gallery (videos included), so reports
+   * can say "photo #52" even when only a sample of the gallery was analysed.
+   */
+  listingIndex?: number;
 }
 
 /** Raw, deterministic computer-vision measurements for one image. */

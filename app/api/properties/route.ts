@@ -15,8 +15,9 @@ export const maxDuration = 60;
  * the page it lives on, so a single-property fetch pulls just that one page
  * (itself fetch-cached) and returns the full photo set on demand.
  *
- *   ?q=<text>  → slim matches by name / city / state (tiny payload)
- *   ?id=<id>   → the one selected property WITH photos, for analysis
+ *   ?q=<text>       → slim matches by name / city / state (tiny payload)
+ *   ?id=<id>        → the one selected property WITH photos, for analysis
+ *   ?ids=<a,b,c>    → up to 60 properties WITH photos, for the villa-card carousels
  */
 
 interface SlimEntry {
@@ -28,10 +29,14 @@ interface SlimEntry {
   rooms?: number;
   maxOccupancy?: number;
   photosCount: number;
+  videoCount: number;
   thumbnail?: string;
   /** Upstream page this property was found on — for on-demand photo fetch. */
   page: number;
 }
+
+/** Most properties a single ?ids= request may hydrate. */
+const MAX_IDS = 60;
 
 const REVALIDATE = 1800; // 30 min
 const CONCURRENCY = 20;
@@ -63,6 +68,7 @@ async function buildSlimIndex(apiKey: string, secretKey: string): Promise<SlimEn
         rooms: p.rooms,
         maxOccupancy: p.maxOccupancy,
         photosCount: p.photosCount,
+        videoCount: p.videoCount,
         thumbnail: p.thumbnail,
         page,
       });
@@ -92,7 +98,8 @@ async function buildSlimIndex(apiKey: string, secretKey: string): Promise<SlimEn
 
 const getSlimIndex = unstable_cache(
   (apiKey: string, secretKey: string) => buildSlimIndex(apiKey, secretKey),
-  ["vista-slim-index-v1"],
+  // v2: photosCount now excludes videos, and entries carry videoCount.
+  ["vista-slim-index-v2"],
   { revalidate: REVALIDATE }
 );
 
@@ -113,12 +120,40 @@ export async function GET(req: NextRequest) {
 
   const sp = req.nextUrl.searchParams;
   const id = sp.get("id");
+  const ids = sp.get("ids");
 
   let slim: SlimEntry[];
   try {
     slim = await getSlimIndex(apiKey, secretKey);
   } catch {
     return NextResponse.json({ error: "Could not reach the Vista API." }, { status: 502 });
+  }
+
+  // Batch fetch (with photos) for a page of search results, so every villa card
+  // can show its full gallery. Each upstream page is fetched once, even when it
+  // holds several of the requested properties, and stays fetch-cached.
+  if (ids) {
+    const wanted = Array.from(
+      new Set(ids.split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n > 0))
+    ).slice(0, MAX_IDS);
+    const entries = wanted
+      .map((n) => slim.find((e) => e.id === n))
+      .filter((e): e is SlimEntry => e !== undefined);
+    const pages = Array.from(new Set(entries.map((e) => e.page)));
+    const pageLists = new Map<number, any[]>();
+    await Promise.all(
+      pages.map((p) =>
+        fetchPageData(p, apiKey, secretKey)
+          .then((d) => pageLists.set(p, Array.isArray(d?.response?.data) ? d.response.data : []))
+          .catch(() => pageLists.set(p, []))
+      )
+    );
+    const properties = entries.flatMap((e) => {
+      const raw = (pageLists.get(e.page) ?? []).find((r) => r?.id === e.id);
+      // Cards don't need amenities; dropping them keeps the payload small.
+      return raw ? [{ ...mapRawProperty(raw), amenities: [] }] : [];
+    });
+    return NextResponse.json({ properties });
   }
 
   // Single-property fetch (with photos) — pulls only the one cached page.

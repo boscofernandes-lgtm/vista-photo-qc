@@ -2,6 +2,7 @@
 
 import { ImageAnalysis } from "@/lib/types";
 import { CATEGORY_LABEL, score01Color } from "@/lib/ui";
+import PhotoButton from "./PhotoButton";
 
 function Mini({ label, v }: { label: string; v: number }) {
   return (
@@ -12,16 +13,16 @@ function Mini({ label, v }: { label: string; v: number }) {
   );
 }
 
-export default function ImageCard({ a }: { a: ImageAnalysis }) {
+export default function ImageCard({ a, onOpen }: { a: ImageAnalysis; onOpen?: () => void }) {
   const cat = a.uncertain ? "Uncertain" : CATEGORY_LABEL[a.clip.top];
   return (
     <div className="card imgcard">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img className="thumb" src={a.input.src} alt={a.input.label ?? "photo"} loading="lazy" />
+      <PhotoButton className="thumb" src={a.input.src} alt={a.input.label ?? "photo"} lazy onClick={onOpen} />
       <div className="body">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <span className="badge">{cat}</span>
           {a.input.label && <span className="badge">{a.input.label}</span>}
+          {a.input.listingIndex != null && <span className="badge num">#{a.input.listingIndex + 1}</span>}
         </div>
         <div className="minis">
           <Mini label="Light" v={a.scores.lighting} />

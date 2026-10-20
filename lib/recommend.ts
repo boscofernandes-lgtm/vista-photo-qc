@@ -36,6 +36,9 @@ function bucketOf(a: ImageAnalysis): ShotCategory {
   return a.uncertain ? "other" : a.clip.top;
 }
 
+/** An exterior keeps the cover pick if it scores at least this share of the top candidate. */
+const EXTERIOR_PREFERENCE = 0.85;
+
 /** 0..1 suitability of an image as the cover/hero. */
 function heroScore(a: ImageAnalysis): number {
   const q = meanQuality(a.scores);
@@ -90,7 +93,9 @@ function verdictFor(a: ImageAnalysis, currentIndex: number): PhotoVerdict {
 /**
  * Derive cover/hero pick, an ideal running order, and per-photo verdicts.
  * `analyses` is assumed to be in the current listing order (StayVista gallery
- * order), so index 0 is treated as the current cover.
+ * order). `currentIndex` is a photo's place among the analysed photos; when the
+ * gallery was sampled, `image.input.listingIndex` holds its real gallery
+ * position, which is what "is this already the cover?" must be judged on.
  */
 export function recommend(analyses: ImageAnalysis[]): Recommendations {
   if (analyses.length === 0) {
@@ -102,18 +107,28 @@ export function recommend(analyses: ImageAnalysis[]): Recommendations {
   // ---- Hero pick ----
   let bestIdx = 0;
   let bestScore = -Infinity;
+  let bestExterior = -1;
+  let bestExteriorScore = -Infinity;
   indexed.forEach(({ image }, i) => {
     const s = heroScore(image);
     if (s > bestScore) {
       bestScore = s;
       bestIdx = i;
     }
+    if (bucketOf(image) === "cover_facade" && s > bestExteriorScore) {
+      bestExteriorScore = s;
+      bestExterior = i;
+    }
   });
+  // The cover should show the villa itself. An amenity shot (a pool, a games
+  // court shared with neighbouring villas) can edge an exterior on score, so a
+  // good exterior wins unless it is clearly weaker.
+  if (bestExterior >= 0 && bestExteriorScore >= EXTERIOR_PREFERENCE * bestScore) bestIdx = bestExterior;
   const heroImg = indexed[bestIdx];
   const hero: HeroPick = {
     image: heroImg.image,
     currentIndex: heroImg.currentIndex,
-    isCurrentCover: heroImg.currentIndex === 0,
+    isCurrentCover: (heroImg.image.input.listingIndex ?? heroImg.currentIndex) === 0,
     reason: heroReason(heroImg.image),
   };
 
