@@ -59,7 +59,10 @@ export default function Recommendations({
           </div>
           <div className="reco-strip">
             {rec.order.map((o) => {
-              const moved = o.currentIndex !== o.suggestedIndex;
+              // Compare the photo's real gallery number with its suggested slot, so a
+              // sampled gallery neither hides real moves nor shows "3 · was #3".
+              const was = photoNo(o.image, o.currentIndex);
+              const moved = was !== o.suggestedIndex + 1;
               return (
                 <div className="reco-shot" key={o.image.input.id}>
                   <span className="reco-rank">{o.suggestedIndex + 1}</span>
@@ -69,7 +72,7 @@ export default function Recommendations({
                     lazy
                     onClick={onPhotoClick ? () => onPhotoClick(o.image) : undefined}
                   />
-                  {moved && <span className="reco-moved">was #{photoNo(o.image, o.currentIndex)}</span>}
+                  {moved && <span className="reco-moved">was #{was}</span>}
                 </div>
               );
             })}

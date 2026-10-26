@@ -12,8 +12,11 @@ import PhotoViewer, { ViewerItem } from "./PhotoViewer";
 
 type SearchState = "idle" | "indexing" | "searching" | "done" | "error";
 
-/** Photos checked per villa, sampled evenly across the gallery so big galleries stay quick. */
+/** Photos checked per villa, sampled across the gallery so big galleries stay quick. */
 const PHOTO_SAMPLE = 40;
+
+/** Below this width the report opens as a full-screen overlay instead of a side panel (see globals.css). */
+const isNarrow = () => typeof window !== "undefined" && window.matchMedia("(max-width: 980px)").matches;
 
 /** A search result rebuilt from a full property, for villas no longer in the results. */
 function summaryFromProperty(p: VistaProperty): VillaSummary {
@@ -67,6 +70,8 @@ export default function BrowseView({
   // ---- Galleries, checks, selection ----
   const [props, setProps] = useState<Record<number, VistaProperty>>({});
   const [galleryErr, setGalleryErr] = useState(false);
+  /** Villas whose full gallery couldn't be loaded; their cards show the cover photo only. */
+  const [galleryFailed, setGalleryFailed] = useState<Set<number>>(() => new Set());
   const [runs, setRuns] = useState<Record<number, VillaRun>>({});
   const [queue, setQueue] = useState<number[]>([]);
   const [slideIdx, setSlideIdx] = useState<Record<number, number>>({});
@@ -120,6 +125,11 @@ export default function BrowseView({
     const missing = ids.filter((id) => !propsRef.current[id]);
     setGalleryErr(false);
     if (missing.length === 0) return;
+    const markFailed = (failed: number[]) => {
+      if (failed.length === 0) return;
+      setGalleryFailed((s) => new Set([...Array.from(s), ...failed]));
+      if (seq === searchSeq.current) setGalleryErr(true);
+    };
     try {
       const res = await fetch(`/api/properties?ids=${missing.join(",")}`);
       const data = await res.json();
@@ -130,8 +140,9 @@ export default function BrowseView({
         for (const p of got) next[p.id] = p;
         return next;
       });
+      markFailed(missing.filter((id) => !got.some((p) => p.id === id)));
     } catch {
-      if (seq === searchSeq.current) setGalleryErr(true);
+      markFailed(missing);
     }
   }
 
@@ -139,9 +150,12 @@ export default function BrowseView({
   function analyze(id: number) {
     setRuns((r) => ({ ...r, [id]: { status: "queued" } }));
     setQueue((qq) => (qq.includes(id) ? qq : [...qq, id]));
-    // Show "Checking <villa>…" in the panel straight away, unless a report is open there.
+    // On wide screens, show "Checking <villa>…" in the side panel straight away,
+    // unless a report is open there. On phones/tablets the report is a
+    // full-screen overlay, so don't cover the page: the card shows progress and
+    // a toast offers the report when it's ready.
     const sel = selectedRef.current;
-    if (sel === null || sel === id || runsRef.current[sel]?.status === "error") setSelectedId(id);
+    if (!isNarrow() && (sel === null || sel === id || runsRef.current[sel]?.status === "error")) setSelectedId(id);
   }
 
   useEffect(() => {
@@ -177,12 +191,13 @@ export default function BrowseView({
       );
       if (analyses.length === 0) throw new Error("None of the photos could be read.");
       setRuns((r) => ({ ...r, [id]: { status: "done", analyses, meta: toMeta(villa), ai: null } }));
-      // Open this report, but never swap out another villa's report while it's being read.
+      // If the panel is already waiting on this villa, its report simply appears.
+      // Otherwise offer it in a toast: never swap out a report that's being read,
+      // and never reopen a panel the user closed.
       const sel = selectedRef.current;
-      if (sel !== null && sel !== id && runsRef.current[sel]?.status === "done") {
-        setToast({ text: `${villa.name} is checked.`, villaId: id });
-      } else {
-        setSelectedId(id);
+      if (sel !== id) {
+        if (sel !== null && runsRef.current[sel]?.status === "error") setSelectedId(id);
+        else setToast({ text: `${villa.name} is checked.`, villaId: id });
       }
     } catch (e: any) {
       setRuns((r) => ({ ...r, [id]: { status: "error", error: e?.message ?? "Something went wrong." } }));
@@ -212,18 +227,33 @@ export default function BrowseView({
   const summaryOf = (id: number): VillaSummary | null =>
     results.find((r) => r.id === id) ?? (props[id] ? summaryFromProperty(props[id]) : null);
 
-  // AI scores are judged against one sub-brand, so a new sub-brand clears them all.
-  function changeBrand(b: SubBrand) {
-    onBrandChange(b);
+  // AI scores are judged against one sub-brand, so a new sub-brand clears them
+  // all, whichever tab it was changed from (the sub-brand is shared).
+  useEffect(() => {
     setRuns((r) => {
+      let changed = false;
       const next = { ...r };
       for (const k of Object.keys(next)) {
         const run = next[Number(k)];
-        if (run.status === "done" && run.ai) next[Number(k)] = { ...run, ai: null };
+        if (run.status === "done" && run.ai) {
+          next[Number(k)] = { ...run, ai: null };
+          changed = true;
+        }
       }
-      return next;
+      return changed ? next : r;
     });
-  }
+  }, [brand]);
+
+  // Escape closes the full-screen report on phones/tablets (the photo viewer
+  // handles its own Escape while it's open).
+  useEffect(() => {
+    if (selectedId === null || viewer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isNarrow()) setSelectedId(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selectedId, viewer]);
 
   function setAI(id: number, ai: AIRubricResult | null) {
     setRuns((r) => {
@@ -274,13 +304,22 @@ export default function BrowseView({
   const selectedRun = selectedId != null ? runs[selectedId] : undefined;
   const selectedSummary = selectedId != null ? summaryOf(selectedId) : null;
   const viewerList = viewer ? viewerItems(viewer.villaId) : [];
-  const showResults = state === "done" && results.length > 0;
+  // Results are only replaced when a search succeeds, so keep showing them (and
+  // any open report) while a new search runs or after one finds nothing.
+  const showResults = results.length > 0 || selectedId != null;
+
+  const closePanel = (
+    <button type="button" className="ghost rp-close rp-empty-close" aria-label="Close" onClick={() => setSelectedId(null)}>
+      ✕
+    </button>
+  );
 
   let panel: ReactNode;
   if (selectedId != null && selectedRun?.status === "done") {
     const id = selectedId;
     panel = (
       <ReportPanel
+        key={id}
         villaId={id}
         meta={selectedRun.meta}
         analyses={selectedRun.analyses}
@@ -288,7 +327,7 @@ export default function BrowseView({
         brand={brand}
         ai={selectedRun.ai}
         aiMode={aiMode}
-        onBrandChange={changeBrand}
+        onBrandChange={onBrandChange}
         onAIModeChange={onAIModeChange}
         onAIResult={(r) => setAI(id, r)}
         onWeightsChange={onWeightsChange}
@@ -301,6 +340,7 @@ export default function BrowseView({
   } else if (selectedId != null && (selectedRun?.status === "running" || selectedRun?.status === "queued")) {
     panel = (
       <div className="rp-empty">
+        {closePanel}
         <span className="spin" aria-hidden="true" />
         <h3>Checking {selectedSummary?.name ?? "this villa"}…</h3>
         <p>
@@ -315,6 +355,7 @@ export default function BrowseView({
     const id = selectedId;
     panel = (
       <div className="rp-empty">
+        {closePanel}
         <h3>Couldn’t check {selectedSummary?.name ?? "this villa"}</h3>
         <p>{selectedRun.error}</p>
         <button type="button" onClick={() => analyze(id)}>
@@ -407,6 +448,7 @@ export default function BrowseView({
                     key={v.id}
                     villa={v}
                     photos={props[v.id]?.photos ?? null}
+                    galleryFailed={galleryFailed.has(v.id)}
                     run={run}
                     score={scored[v.id]?.score ?? null}
                     rec={scored[v.id]?.rec ?? null}

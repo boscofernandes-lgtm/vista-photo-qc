@@ -115,6 +115,21 @@ export function mapRawProperty(raw: any): VistaProperty {
 const ALWAYS_CHECK_FIRST = 8;
 
 /**
+ * Pick at most `max` items, keeping gallery order: always the first few (the
+ * cover and what guests see first), then the remaining slots spread evenly over
+ * the rest so the sample still represents the whole gallery.
+ */
+export function sampleFrontLoaded<T>(arr: T[], max: number): T[] {
+  if (max <= 0) return [];
+  if (arr.length <= max) return arr;
+  const head = arr.slice(0, Math.min(ALWAYS_CHECK_FIRST, max));
+  const rest = arr.slice(head.length);
+  const slots = max - head.length;
+  const step = rest.length / slots;
+  return [...head, ...Array.from({ length: slots }, (_, i) => rest[Math.floor(i * step)])];
+}
+
+/**
  * Convert a selected property's photos into analyzer inputs. Videos are left
  * out (they can't be photo-checked). When `max` is set and the gallery is
  * larger, the first few photos (the cover and what guests see first) are always
@@ -127,13 +142,7 @@ export function toImageInputs(p: VistaProperty, max?: number): ImageInput[] {
   let stills = p.photos
     .map((ph, listingIndex) => ({ ph, listingIndex }))
     .filter(({ ph }) => (ph.kind ?? (isVideoUrl(ph.source) ? "video" : "image")) === "image");
-  if (max && stills.length > max) {
-    const head = stills.slice(0, Math.min(ALWAYS_CHECK_FIRST, max));
-    const rest = stills.slice(head.length);
-    const slots = max - head.length;
-    const step = rest.length / slots;
-    stills = [...head, ...Array.from({ length: slots }, (_, i) => rest[Math.floor(i * step)])];
-  }
+  if (max) stills = sampleFrontLoaded(stills, max);
   return stills.map(({ ph, listingIndex }) => ({
     id: `vista-${p.id}-${listingIndex}`,
     src: proxied(ph.source),

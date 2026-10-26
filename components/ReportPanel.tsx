@@ -66,6 +66,8 @@ export default function ReportPanel({
     if (!body || !el) return;
     const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     body.scrollTo({ top: el.offsetTop - 6, behavior: smooth ? "smooth" : "auto" });
+    // Move keyboard focus too, so the next Tab continues from that section.
+    el.focus({ preventScroll: true });
   };
 
   const location = [meta.city, meta.state].filter(Boolean).join(", ");
@@ -98,16 +100,16 @@ export default function ReportPanel({
       </div>
 
       <div className="rp-body" ref={bodyRef}>
-        <section data-section="summary">
+        <section tabIndex={-1} data-section="summary">
           <ScoreHero result={result} meta={meta} />
         </section>
-        <section data-section="fix">
+        <section tabIndex={-1} data-section="fix">
           <ReshootList result={result} onPhotoClick={onPhotoClick} />
         </section>
-        <section data-section="reco">
+        <section tabIndex={-1} data-section="reco">
           <Recommendations analyses={analyses} onPhotoClick={onPhotoClick} />
         </section>
-        <section data-section="ai">
+        <section tabIndex={-1} data-section="ai">
           <BrandAIControls
             key={villaId}
             analyses={analyses}
@@ -119,16 +121,16 @@ export default function ReportPanel({
             onAIResult={onAIResult}
           />
         </section>
-        <section data-section="breakdown">
+        <section tabIndex={-1} data-section="breakdown">
           <ScoreBreakdown result={result} />
         </section>
-        <section data-section="bench">
+        <section tabIndex={-1} data-section="bench">
           <BenchmarkPanel result={result} brand={brand} />
         </section>
-        <section data-section="photos">
+        <section tabIndex={-1} data-section="photos">
           <PhotoGrid analyses={analyses} onPhotoClick={onPhotoClick} />
         </section>
-        <section data-section="weights">
+        <section tabIndex={-1} data-section="weights">
           <WeightsPanel weights={weights} onChange={onWeightsChange} />
         </section>
       </div>

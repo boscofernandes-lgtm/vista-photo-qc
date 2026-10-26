@@ -6,6 +6,7 @@ import { scoreProperty, DEFAULT_WEIGHTS } from "@/lib/scoring";
 import { BRAND_PROFILES, DEFAULT_BRAND } from "@/lib/brands";
 import { runAIRubric, AIRubricError } from "@/lib/airubric";
 import { gradeColor } from "@/lib/ui";
+import { sampleFrontLoaded } from "@/lib/vistaApi";
 import { AIRubricResult, ImageInput, PropertyMeta, PropertyScore, SubBrand } from "@/lib/types";
 
 const BRAND_ORDER: SubBrand[] = ["vieda", "villas", "veo", "vaana", "residences", "grams"];
@@ -49,12 +50,6 @@ interface BulkRow {
 
 type SortMode = "input" | "worst" | "best";
 
-/** Evenly sample `arr` down to at most `max` items (keeps coverage representative). */
-function evenSample<T>(arr: T[], max: number): T[] {
-  if (arr.length <= max) return arr;
-  const step = arr.length / max;
-  return Array.from({ length: max }, (_, i) => arr[Math.floor(i * step)]);
-}
 
 /** Pull StayVista villa URLs out of a pasted blob (newline / comma / space separated). */
 function parseUrls(text: string): string[] {
@@ -162,7 +157,9 @@ export default function BulkRunner() {
           source: "url" as const,
           listingIndex: typeof im.listingIndex === "number" ? im.listingIndex : undefined,
         }));
-        const sampled = evenSample(inputs, PHOTO_CAP);
+        // Same sample as Browse (first photos always, rest spread evenly), so a
+        // villa scores the same in both tabs.
+        const sampled = sampleFrontLoaded(inputs, PHOTO_CAP);
         if (sampled.length === 0) throw new Error("No readable photos on this listing.");
 
         const analyses = await analyzeBatch(sampled, (p) =>

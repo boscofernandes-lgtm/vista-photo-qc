@@ -78,6 +78,7 @@ const ExpandIcon = () => (
 export default function VillaCard({
   villa,
   photos,
+  galleryFailed,
   run,
   score,
   rec,
@@ -92,6 +93,8 @@ export default function VillaCard({
   villa: VillaSummary;
   /** Full gallery from /api/properties?ids=, or null while it loads. */
   photos: VistaPhoto[] | null;
+  /** True when the full gallery couldn't be loaded (the card keeps its cover photo). */
+  galleryFailed?: boolean;
   run?: VillaRun;
   /** Score under the current sub-brand / weights / AI result, once checked. */
   score: PropertyScore | null;
@@ -163,7 +166,9 @@ export default function VillaCard({
     photoLine = <span className="vc-line muted">No photos on this listing</span>;
   } else if (run?.status !== "done" || !rec) {
     photoLine = (
-      <span className="vc-line muted">{loaded ? "Click a photo to see it larger" : "Loading the full gallery…"}</span>
+      <span className="vc-line muted">
+        {loaded ? "Click a photo to see it larger" : galleryFailed ? "Showing the cover photo only" : "Loading the full gallery…"}
+      </span>
     );
   } else {
     const no = i + 1;

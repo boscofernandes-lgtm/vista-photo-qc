@@ -41,6 +41,14 @@ export default function Home() {
 
   const busy = status === "scraping" || status === "analyzing";
 
+  // The sub-brand is shared by every tab, and AI scores are judged against one
+  // sub-brand, so a change from any tab drops this report's AI score (Browse
+  // clears its own villas' AI scores when it sees the new sub-brand).
+  const changeBrand = (b: SubBrand) => {
+    setBrand(b);
+    setAi(null);
+  };
+
   async function run(inputs: ImageInput[], m: PropertyMeta) {
     if (inputs.length === 0) {
       setError("No images found to analyze.");
@@ -156,7 +164,7 @@ export default function Home() {
         <BrowseView
           tabs={tabs}
           brand={brand}
-          onBrandChange={setBrand}
+          onBrandChange={changeBrand}
           weights={weights}
           onWeightsChange={setWeights}
           aiMode={aiMode}
@@ -238,7 +246,7 @@ export default function Home() {
               <BrandAIControls
                 analyses={analyses}
                 brand={brand}
-                onBrandChange={setBrand}
+                onBrandChange={changeBrand}
                 aiMode={aiMode}
                 onAIModeChange={setAiMode}
                 ai={ai}
@@ -263,6 +271,7 @@ export default function Home() {
               title={meta.name}
               items={viewerItems(analyses)}
               index={viewIndex}
+              total={Math.max(analyses.length, ...analyses.map((a, i) => (a.input.listingIndex ?? i) + 1))}
               onIndexChange={setViewIndex}
               onClose={() => setViewIndex(null)}
             />
