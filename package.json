@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.5.0",
+    "fflate": "^0.8.2",
     "next": "^15.5.19",
     "react": "19.0.0",
     "react-dom": "19.0.0"

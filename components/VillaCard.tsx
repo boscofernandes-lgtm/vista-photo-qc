@@ -2,20 +2,15 @@
 
 import { useMemo, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import {
-  AIRubricResult,
-  ImageAnalysis,
-  PhotoVerdict,
-  PropertyMeta,
-  PropertyScore,
-  Recommendations,
-} from "@/lib/types";
-import { VistaPhoto, isVideoUrl, proxied } from "@/lib/vistaApi";
+import { PhotoVerdict, PropertyScore, Recommendations } from "@/lib/types";
+import { GalleryPhoto } from "@/lib/gallery";
 import { gradeColor, shortFlag } from "@/lib/ui";
+import type { VillaRun } from "./useVillaChecks";
 
-/** A search result, as returned by /api/properties?q=. */
+/** What a card shows about a villa (a search result, a scraped page or an upload). */
 export interface VillaSummary {
-  id: number;
+  /** StayVista property id, when the villa came from the catalog. */
+  id?: number;
   name: string;
   city?: string;
   state?: string;
@@ -24,33 +19,28 @@ export interface VillaSummary {
   maxOccupancy?: number;
   photosCount: number;
   videoCount?: number;
+  /** Cover photo to show until the full gallery has loaded. */
   thumbnail?: string;
 }
 
-/** Where one villa's QC check is up to. */
-export type VillaRun =
-  | { status: "queued" }
-  | { status: "running"; done: number; total: number }
-  | { status: "done"; analyses: ImageAnalysis[]; meta: PropertyMeta; ai: AIRubricResult | null }
-  | { status: "error"; error: string };
-
-export interface Slide {
+/** A villa as the workspace sees it: summary, plus its gallery once loaded. */
+export interface VillaEntry {
   key: string;
-  kind: "image" | "video";
-  /** Proxied image URL, or the original URL for a video. */
-  src: string;
-  tag: string | null;
+  summary: VillaSummary;
+  /** Full gallery in listing order, or null while it loads. */
+  photos: GalleryPhoto[] | null;
+  /** True when the full gallery couldn't be loaded (the card keeps its cover photo). */
+  galleryFailed?: boolean;
+  /** Original listing page, when there is one. */
+  sourceUrl?: string;
 }
 
-/** The card's slides: the whole gallery in listing order once loaded, else the search thumbnail. */
-export function slidesFor(villa: VillaSummary, photos: VistaPhoto[] | null): Slide[] {
-  if (photos && photos.length) {
-    return photos.map((ph, i) => {
-      const kind = ph.kind ?? (isVideoUrl(ph.source) ? "video" : "image");
-      return { key: `${villa.id}-${i}`, kind, src: kind === "video" ? ph.source : proxied(ph.source), tag: ph.tag };
-    });
-  }
-  return villa.thumbnail ? [{ key: `${villa.id}-thumb`, kind: "image", src: villa.thumbnail, tag: null }] : [];
+/** The card's slides: the whole gallery once loaded, else the cover thumbnail. */
+export function slidesOf(entry: VillaEntry): GalleryPhoto[] {
+  if (entry.photos && entry.photos.length) return entry.photos;
+  return entry.summary.thumbnail
+    ? [{ key: `${entry.key}-thumb`, kind: "image", src: entry.summary.thumbnail, label: null }]
+    : [];
 }
 
 const PinIcon = () => (
@@ -76,9 +66,7 @@ const ExpandIcon = () => (
 );
 
 export default function VillaCard({
-  villa,
-  photos,
-  galleryFailed,
+  entry,
   run,
   score,
   rec,
@@ -90,11 +78,7 @@ export default function VillaCard({
   onShowReport,
   onOpenPhoto,
 }: {
-  villa: VillaSummary;
-  /** Full gallery from /api/properties?ids=, or null while it loads. */
-  photos: VistaPhoto[] | null;
-  /** True when the full gallery couldn't be loaded (the card keeps its cover photo). */
-  galleryFailed?: boolean;
+  entry: VillaEntry;
   run?: VillaRun;
   /** Score under the current sub-brand / weights / AI result, once checked. */
   score: PropertyScore | null;
@@ -111,11 +95,23 @@ export default function VillaCard({
   onShowReport: () => void;
   onOpenPhoto: (i: number) => void;
 }) {
-  const slides = useMemo(() => slidesFor(villa, photos), [villa, photos]);
+  const villa = entry.summary;
+  const slides = useMemo(() => slidesOf(entry), [entry]);
   const n = slides.length;
   const i = n ? Math.min(Math.max(index, 0), n - 1) : 0;
   const slide = slides[i];
-  const loaded = photos !== null;
+  const loaded = entry.photos !== null;
+  // What to say while a villa has no slides yet (Bulk loads each listing when its check starts).
+  const notLoadedText =
+    run?.status === "error"
+      ? "Couldn’t load the listing"
+      : run?.status === "running"
+        ? "Loading the listing…"
+        : entry.galleryFailed
+          ? "Showing the cover photo only"
+          : entry.summary.thumbnail
+            ? "Loading the full gallery…"
+            : "Photos appear when the check starts";
 
   const verdictByIndex = useMemo(() => {
     const m = new Map<number, PhotoVerdict>();
@@ -163,11 +159,11 @@ export default function VillaCard({
   // ---- What the QC check said about the photo on screen ----
   let photoLine: ReactNode;
   if (!slide) {
-    photoLine = <span className="vc-line muted">No photos on this listing</span>;
+    photoLine = <span className="vc-line muted">{loaded ? "No photos on this listing" : notLoadedText}</span>;
   } else if (run?.status !== "done" || !rec) {
     photoLine = (
       <span className="vc-line muted">
-        {loaded ? "Click a photo to see it larger" : galleryFailed ? "Showing the cover photo only" : "Loading the full gallery…"}
+        {loaded ? "Click a photo to see it larger" : notLoadedText}
       </span>
     );
   } else {
@@ -210,7 +206,7 @@ export default function VillaCard({
     pill = (
       <span className="vc-pill">
         <span className="spin" aria-hidden="true" />
-        Checking {run.done}/{run.total}
+        {run.ai ? "AI scoring…" : run.total ? `Checking ${run.done}/${run.total}` : "Loading…"}
       </span>
     );
   else if (run.status === "error") pill = <span className="vc-pill bad">Check failed</span>;
@@ -232,7 +228,7 @@ export default function VillaCard({
           <span className="vc-k">Photo QC</span>
           <span className="vc-v">Not checked yet</span>
         </div>
-        <button type="button" onClick={onAnalyze} disabled={n === 0}>
+        <button type="button" onClick={onAnalyze} disabled={loaded && n === 0}>
           Analyze villa
         </button>
       </>
@@ -256,10 +252,12 @@ export default function VillaCard({
     foot = (
       <div className="vc-run">
         <div className="vc-run-row" aria-live="polite">
-          <span>Checking photos…</span>
-          <span className="vc-num">
-            {run.done} / {run.total}
-          </span>
+          <span>{run.ai ? "AI scoring…" : run.total ? "Checking photos…" : "Loading the listing…"}</span>
+          {run.total > 0 && !run.ai && (
+            <span className="vc-num">
+              {run.done} / {run.total}
+            </span>
+          )}
         </div>
         <div className="progress" aria-hidden="true">
           <div style={{ width: `${Math.max(3, pct)}%` }} />
@@ -297,6 +295,13 @@ export default function VillaCard({
             {score.reshootList.length === 0
               ? "No photos to fix"
               : `${score.reshootList.length} photo${score.reshootList.length === 1 ? "" : "s"} to fix`}
+            {score.aiAssisted && <span className="ai-badge vc-ai">AI</span>}
+            {run.aiError && (
+              <span className="vc-ai-off" title={run.aiError}>
+                {" "}
+                · AI unavailable, CV only
+              </span>
+            )}
           </span>
         </div>
         <button
@@ -315,7 +320,8 @@ export default function VillaCard({
   const facts = [
     villa.maxOccupancy ? `Up to ${villa.maxOccupancy} Guests` : null,
     villa.rooms ? `${villa.rooms} Rooms` : null,
-    `${villa.photosCount} Photos`,
+    // Unknown until the listing loads (Bulk), so don't claim "0 Photos".
+    loaded || villa.photosCount > 0 ? `${villa.photosCount} Photo${villa.photosCount === 1 ? "" : "s"}` : null,
     villa.videoCount ? `${villa.videoCount} Video${villa.videoCount === 1 ? "" : "s"}` : null,
   ].filter((x): x is string => x !== null);
 
@@ -346,7 +352,7 @@ export default function VillaCard({
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={s.src}
-                    alt={k === i ? `${villa.name}: ${s.tag?.trim() || "photo"} (${k + 1} of ${n})` : ""}
+                    alt={k === i ? `${villa.name}: ${s.label?.trim() || "photo"} (${k + 1} of ${n})` : ""}
                     crossOrigin="anonymous"
                     draggable={false}
                     decoding="async"
@@ -355,7 +361,7 @@ export default function VillaCard({
             </div>
           ))}
         </div>
-        {n === 0 && <div className="vc-empty">No photos</div>}
+        {n === 0 && <div className="vc-empty">{loaded ? "No photos" : notLoadedText}</div>}
 
         {pill}
         {slide && (
@@ -364,8 +370,8 @@ export default function VillaCard({
           </button>
         )}
         {loaded && slide && (
-          <span className={`vc-tag ${slide.kind === "image" && !slide.tag ? "none" : ""}`}>
-            {slide.kind === "video" ? "Video" : slide.tag?.trim() || "No room label"}
+          <span className={`vc-tag ${slide.kind === "image" && !slide.label ? "none" : ""}`}>
+            {slide.kind === "video" ? "Video" : slide.label?.trim() || "No room label"}
           </span>
         )}
         {slide && (i === 0 || loaded) && (
