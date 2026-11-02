@@ -65,6 +65,8 @@ export async function GET(req: NextRequest) {
   const detail = data?.property_detail ?? {};
   const seen = new Set<string>();
   const images: { id: string; src: string; originalUrl: string; label?: string; listingIndex: number }[] = [];
+  // The whole gallery in listing order, videos included, for the card carousel.
+  const gallery: { src: string; originalUrl: string; label?: string; kind: "image" | "video" }[] = [];
   let position = 0;
 
   const add = (url: unknown, label?: string) => {
@@ -73,7 +75,9 @@ export async function GET(req: NextRequest) {
     seen.add(url);
     // Videos keep their slot in the gallery numbering but can't be photo-checked.
     const listingIndex = position++;
-    if (isVideoUrl(url)) return;
+    const video = isVideoUrl(url);
+    gallery.push({ src: video ? url : proxied(url), originalUrl: url, label, kind: video ? "video" : "image" });
+    if (video) return;
     images.push({
       id: `img-${listingIndex}`,
       src: proxied(url),
@@ -124,5 +128,5 @@ export async function GET(req: NextRequest) {
     sourceUrl: parsed.toString(),
   };
 
-  return NextResponse.json({ meta, images });
+  return NextResponse.json({ meta, images, gallery });
 }

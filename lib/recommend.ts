@@ -115,14 +115,16 @@ export function recommend(analyses: ImageAnalysis[]): Recommendations {
       bestScore = s;
       bestIdx = i;
     }
-    if (bucketOf(image) === "cover_facade" && s > bestExteriorScore) {
+    // Only a clean exterior earns the preference; a flagged one (blurry, dark…)
+    // competes on its raw score like any other photo.
+    if (bucketOf(image) === "cover_facade" && image.flags.length === 0 && meanQuality(image.scores) >= 0.5 && s > bestExteriorScore) {
       bestExteriorScore = s;
       bestExterior = i;
     }
   });
   // The cover should show the villa itself. An amenity shot (a pool, a games
   // court shared with neighbouring villas) can edge an exterior on score, so a
-  // good exterior wins unless it is clearly weaker.
+  // clean exterior wins unless it is clearly weaker.
   if (bestExterior >= 0 && bestExteriorScore >= EXTERIOR_PREFERENCE * bestScore) bestIdx = bestExterior;
   const heroImg = indexed[bestIdx];
   const hero: HeroPick = {

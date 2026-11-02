@@ -1,12 +1,9 @@
 "use client";
 
-import { AIRubricResult, ImageAnalysis, PropertyMeta, PropertyScore, SubBrand, SubScore, Weights } from "@/lib/types";
-import { scoreProperty } from "@/lib/scoring";
+import { ImageAnalysis, PropertyMeta, PropertyScore, SubScore } from "@/lib/types";
 import { gradeColor, score01Color } from "@/lib/ui";
 import ImageCard from "./ImageCard";
-import Recommendations from "./Recommendations";
 import FixDownload from "./FixDownload";
-import BenchmarkPanel from "./BenchmarkPanel";
 import PhotoButton from "./PhotoButton";
 
 /** Opens a photo in the photo viewer. */
@@ -160,42 +157,12 @@ export function ReshootList({ result, onPhotoClick }: { result: PropertyScore; o
 export function PhotoGrid({ analyses, onPhotoClick }: { analyses: ImageAnalysis[]; onPhotoClick?: PhotoClick }) {
   return (
     <>
-      <div className="section-title">All photos ({analyses.length})</div>
+      <div className="section-title">Photo scores ({analyses.length})</div>
       <div className="grid">
         {analyses.map((a) => (
           <ImageCard key={a.input.id} a={a} onOpen={onPhotoClick ? () => onPhotoClick(a) : undefined} />
         ))}
       </div>
     </>
-  );
-}
-
-/** The full-width report used by the URL and Upload tabs. */
-export default function ScoreReport({
-  meta,
-  analyses,
-  weights,
-  brand,
-  ai,
-  onPhotoClick,
-}: {
-  meta: PropertyMeta;
-  analyses: ImageAnalysis[];
-  weights: Weights;
-  brand: SubBrand;
-  ai: AIRubricResult | null;
-  onPhotoClick?: PhotoClick;
-}) {
-  const result = scoreProperty(analyses, weights, { brand, ai });
-
-  return (
-    <div>
-      <ScoreHero result={result} meta={meta} />
-      <BenchmarkPanel result={result} brand={brand} />
-      <Recommendations analyses={analyses} onPhotoClick={onPhotoClick} />
-      <ScoreBreakdown result={result} />
-      {result.reshootList.length > 0 && <ReshootList result={result} onPhotoClick={onPhotoClick} />}
-      <PhotoGrid analyses={analyses} onPhotoClick={onPhotoClick} />
-    </div>
   );
 }
