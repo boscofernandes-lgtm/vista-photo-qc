@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { GalleryPhoto } from "@/lib/gallery";
+import { useHoverArrows } from "./useHoverArrows";
 
 const HeartIcon = () => (
   <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -59,7 +61,16 @@ export default function CityPageView({
   // A new cover (re-ordered gallery) should be what the preview shows first.
   useEffect(() => setI(0), [coverKey]);
 
-  const go = (d: number) => setI((cur) => (Math.min(cur, n - 1) + d + n) % n);
+  const go = (d: number) => {
+    if (n > 1) setI((cur) => (Math.min(cur, n - 1) + d + n) % n);
+  };
+  // ← / → browse while the mouse is over the photo, or after clicking ‹ / › or the photo.
+  const hoverArrows = useHoverArrows(go);
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    go(e.key === "ArrowRight" ? 1 : -1);
+  };
   const facts = [guests ? `Upto ${guests} Guests` : null, rooms ? `${rooms} Rooms` : null].filter(
     (x): x is string => x !== null
   );
@@ -68,7 +79,7 @@ export default function CityPageView({
     <div className="cpv">
       <div className="cpv-page">
         <div className="cpv-card">
-          <div className="cpv-img">
+          <div className="cpv-img" {...hoverArrows} onKeyDown={onKeyDown}>
             {photo ? (
               <button
                 type="button"
@@ -88,10 +99,10 @@ export default function CityPageView({
             {idx === 0 && n > 0 && <span className="cpv-cover">Cover</span>}
             {n > 1 && (
               <>
-                <button type="button" className="cpv-nav prev" aria-label="Previous photo" onClick={() => go(-1)}>
+                <button type="button" className="cpv-nav prev" aria-label="Previous photo" title="Previous photo (←)" onClick={() => go(-1)}>
                   ‹
                 </button>
-                <button type="button" className="cpv-nav next" aria-label="Next photo" onClick={() => go(1)}>
+                <button type="button" className="cpv-nav next" aria-label="Next photo" title="Next photo (→)" onClick={() => go(1)}>
                   ›
                 </button>
                 <span className="cpv-count">

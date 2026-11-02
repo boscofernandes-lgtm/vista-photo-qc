@@ -16,6 +16,18 @@ import { PhotoClick, PhotoGrid, ReshootList, ScoreBreakdown, ScoreHero } from ".
 import type { VillaSummary } from "./VillaCard";
 import type { Download } from "./useVillaChecks";
 
+const MaximizeIcon = () => (
+  <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const RestoreIcon = () => (
+  <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+    <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 /**
  * The full QC report for one villa, laid out for the side panel: every section
  * of the full report (plus the sub-brand / AI and weights controls), ordered so
@@ -41,6 +53,8 @@ export default function ReportPanel({
   download,
   onDownloadChange,
   onClose,
+  maximized,
+  onToggleMaximize,
   onPhotoClick,
   onOpenGalleryPhoto,
 }: {
@@ -65,6 +79,9 @@ export default function ReportPanel({
   download: Download;
   onDownloadChange: (d: Download) => void;
   onClose: () => void;
+  /** True while the report fills the screen. */
+  maximized: boolean;
+  onToggleMaximize: () => void;
   onPhotoClick: PhotoClick;
   /** Open the photo viewer at a gallery position. */
   onOpenGalleryPhoto: (galleryIndex: number) => void;
@@ -133,9 +150,21 @@ export default function ReportPanel({
               </span>
             </div>
           </div>
-          <button type="button" className="ghost rp-close" aria-label="Close report" onClick={onClose}>
-            ✕
-          </button>
+          <div className="rp-head-btns">
+            <button
+              type="button"
+              className="ghost rp-close rp-max"
+              aria-label={maximized ? "Restore report size" : "Maximize report"}
+              aria-pressed={maximized}
+              title={maximized ? "Restore size (Esc)" : "Maximize"}
+              onClick={onToggleMaximize}
+            >
+              {maximized ? <RestoreIcon /> : <MaximizeIcon />}
+            </button>
+            <button type="button" className="ghost rp-close" aria-label="Close report" onClick={onClose}>
+              ✕
+            </button>
+          </div>
         </div>
         <nav className="rp-nav" aria-label="Report sections">
           {sections.map((s) => (

@@ -6,6 +6,7 @@ import { PhotoVerdict, PropertyScore, Recommendations } from "@/lib/types";
 import { GalleryPhoto } from "@/lib/gallery";
 import { gradeColor, shortFlag } from "@/lib/ui";
 import type { VillaRun } from "./useVillaChecks";
+import { useHoverArrows } from "./useHoverArrows";
 
 /** What a card shows about a villa (a search result, a scraped page or an upload). */
 export interface VillaSummary {
@@ -124,6 +125,8 @@ export default function VillaCard({
   const go = (d: number) => {
     if (n > 1) onStep(d, n);
   };
+  // ← / → browse the photos while the mouse is over the card.
+  const hoverArrows = useHoverArrows(go);
 
   // A short tap opens the photo; a horizontal swipe changes it.
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
@@ -143,14 +146,16 @@ export default function VillaCard({
     else if (!d.moved && slide) onOpenPhoto(i);
   };
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return;
+    // Arrows also work after clicking ‹ / › (focus is then on that button).
+    const onGallery = e.target === e.currentTarget;
+    if (!onGallery && !(e.target as HTMLElement).classList.contains("vc-nav")) return;
     if (e.key === "ArrowRight") {
       e.preventDefault();
       go(1);
     } else if (e.key === "ArrowLeft") {
       e.preventDefault();
       go(-1);
-    } else if ((e.key === "Enter" || e.key === " ") && slide) {
+    } else if (onGallery && (e.key === "Enter" || e.key === " ") && slide) {
       e.preventDefault();
       onOpenPhoto(i);
     }
@@ -326,7 +331,7 @@ export default function VillaCard({
   ].filter((x): x is string => x !== null);
 
   return (
-    <article className={`vcard ${selected ? "selected" : ""}`} aria-label={villa.name}>
+    <article className={`vcard ${selected ? "selected" : ""}`} aria-label={villa.name} {...hoverArrows}>
       <div
         className="vc-gal"
         tabIndex={0}
@@ -379,10 +384,10 @@ export default function VillaCard({
         )}
         {n > 1 && (
           <>
-            <button type="button" className="vc-nav prev" aria-label="Previous photo" onClick={() => go(-1)}>
+            <button type="button" className="vc-nav prev" aria-label="Previous photo" title="Previous photo (←)" onClick={() => go(-1)}>
               ‹
             </button>
-            <button type="button" className="vc-nav next" aria-label="Next photo" onClick={() => go(1)}>
+            <button type="button" className="vc-nav next" aria-label="Next photo" title="Next photo (→)" onClick={() => go(1)}>
               ›
             </button>
             <div className="vc-pos" aria-hidden="true">

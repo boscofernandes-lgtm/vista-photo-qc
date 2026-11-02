@@ -1,11 +1,18 @@
 "use client";
 
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { PhotoVerdict, SubBrand, Weights } from "@/lib/types";
 import VillaCard, { VillaEntry, slidesOf } from "./VillaCard";
 import ReportPanel from "./ReportPanel";
 import PhotoViewer, { ViewerItem } from "./PhotoViewer";
 import type { VillaChecks } from "./useVillaChecks";
+import { MIN_PANEL_WIDTH, setPanelWidth, usePanelWidth } from "./panelSize";
+
+/** Room kept for the cards beside the report: one card column plus the gap (matches globals.css). */
+const MIN_CARDS_WIDTH = 322;
+/** How far one arrow-key press moves the report's edge. */
+const KEY_STEP = 40;
 
 /**
  * The layout every tab shares: villa cards with photo carousels on the left,
@@ -42,6 +49,75 @@ export default function Workspace({
   emptyText: ReactNode;
 }) {
   const { runs, scored, queue, selectedKey, setSelectedKey, viewer } = ws;
+
+  // ---- Report size: drag (or arrow-key) the panel's left edge, or maximize it ----
+  const panelWidth = usePanelWidth();
+  const [maximized, setMaximized] = useState(false);
+  const isMax = maximized && selectedKey != null;
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  const resizing = useRef<{ x: number; w: number; now: number } | null>(null);
+
+  // A closed report reopens at its normal size.
+  useEffect(() => {
+    if (selectedKey == null) setMaximized(false);
+  }, [selectedKey]);
+
+  // Esc restores a maximized report (the photo viewer handles its own Esc).
+  useEffect(() => {
+    if (!isMax || viewer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMaximized(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isMax, viewer]);
+
+  const clampWidth = (w: number) => {
+    const room = (layoutRef.current?.clientWidth ?? window.innerWidth) - MIN_CARDS_WIDTH;
+    return Math.round(Math.min(Math.max(w, MIN_PANEL_WIDTH), Math.max(MIN_PANEL_WIDTH, room)));
+  };
+  const currentWidth = () => asideRef.current?.getBoundingClientRect().width ?? MIN_PANEL_WIDTH;
+
+  const onResizeDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Keep resizing even if capture isn't available.
+    }
+    const w = currentWidth();
+    resizing.current = { x: e.clientX, w, now: w };
+    document.body.classList.add("resizing");
+  };
+  const onResizeMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const r = resizing.current;
+    if (!r) return;
+    // Live preview without re-rendering every card; saved on release.
+    r.now = clampWidth(r.w + (r.x - e.clientX));
+    layoutRef.current?.style.setProperty("--rp-w", `${r.now}px`);
+    layoutRef.current?.classList.add("sized");
+  };
+  const onResizeUp = () => {
+    const r = resizing.current;
+    if (!r) return;
+    resizing.current = null;
+    document.body.classList.remove("resizing");
+    // A click without a drag leaves the width alone (so double-click can reset it).
+    if (r.now !== r.w) setPanelWidth(r.now);
+  };
+  const onResizeKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    let w: number | null;
+    if (e.key === "ArrowLeft") w = clampWidth(currentWidth() + KEY_STEP); // the edge moves left: wider
+    else if (e.key === "ArrowRight") w = clampWidth(currentWidth() - KEY_STEP);
+    else if (e.key === "Home") w = clampWidth(Number.MAX_SAFE_INTEGER);
+    else if (e.key === "End") w = MIN_PANEL_WIDTH;
+    else if (e.key === "Enter") w = null;
+    else return;
+    e.preventDefault();
+    setPanelWidth(w);
+  };
 
   // ---- Photo viewer: the villa's whole gallery, with QC results where there are any ----
   function viewerItems(key: string): ViewerItem[] {
@@ -111,6 +187,8 @@ export default function Workspace({
         download={ws.downloads[key] ?? { state: "idle" }}
         onDownloadChange={(d) => ws.setDownload(key, d)}
         onClose={() => setSelectedKey(null)}
+        maximized={isMax}
+        onToggleMaximize={() => setMaximized((m) => !m)}
         onPhotoClick={(a) => {
           if (a.input.listingIndex != null) ws.showPhoto(key, a.input.listingIndex);
         }}
@@ -158,7 +236,11 @@ export default function Workspace({
 
   return (
     <>
-      <div className={`browse ${selectedKey != null ? "has-report" : ""}`}>
+      <div
+        ref={layoutRef}
+        className={`browse ${selectedKey != null ? "has-report" : ""} ${panelWidth != null ? "sized" : ""}`}
+        style={panelWidth != null ? ({ "--rp-w": `${panelWidth}px` } as CSSProperties) : undefined}
+      >
         <div className="browse-main">
           {bar}
           <div className="villa-grid">
@@ -183,7 +265,29 @@ export default function Workspace({
             })}
           </div>
         </div>
-        <aside className={`report-panel ${selectedKey != null ? "open" : ""}`} aria-label="QC report">
+        <aside
+          ref={asideRef}
+          className={`report-panel ${selectedKey != null ? "open" : ""} ${isMax ? "max" : ""}`}
+          aria-label="QC report"
+        >
+          {selectedKey != null && !isMax && (
+            <div
+              className="rp-resize"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize report. Arrow keys change the width, Enter resets it."
+              title="Drag to resize · double-click to reset"
+              tabIndex={0}
+              aria-valuemin={MIN_PANEL_WIDTH}
+              aria-valuenow={panelWidth ?? undefined}
+              onPointerDown={onResizeDown}
+              onPointerMove={onResizeMove}
+              onPointerUp={onResizeUp}
+              onPointerCancel={onResizeUp}
+              onDoubleClick={() => setPanelWidth(null)}
+              onKeyDown={onResizeKey}
+            />
+          )}
           {panel}
         </aside>
       </div>

@@ -521,6 +521,29 @@ textarea.bulk-input:disabled { opacity: 0.6; }
 .rp-name { font-family: var(--display); font-size: 22px; margin: 4px 0 3px; line-height: 1.2; }
 .rp-sub { font-size: 13px; color: var(--muted); text-transform: capitalize; }
 .rp-close { flex: none; padding: 8px 12px; font-size: 14px; }
+.rp-head-btns { flex: none; display: flex; gap: 6px; }
+.rp-max { display: grid; place-items: center; }
+
+/* Resizing: drag the report's left edge (or focus it and use the arrow keys). */
+.browse.sized { grid-template-columns: minmax(0, 1fr) min(var(--rp-w), calc(100% - 322px)); }
+.rp-resize {
+  position: absolute; top: 0; bottom: 0; left: -16px; width: 14px; z-index: 2; cursor: col-resize; touch-action: none;
+  display: grid; place-items: center; border-radius: 7px; outline: none;
+}
+.rp-resize::before {
+  content: ""; width: 4px; height: 44px; border-radius: 99px; background: var(--border); transition: background 0.15s ease, height 0.15s ease;
+}
+.rp-resize:hover::before, .rp-resize:focus-visible::before, body.resizing .rp-resize::before { background: var(--gold); height: 72px; }
+.rp-resize:focus-visible { box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.45); }
+body.resizing { cursor: col-resize; user-select: none; }
+body.resizing iframe, body.resizing img { pointer-events: none; }
+
+/* Maximized: the report fills the screen; Esc or the restore button brings it back. */
+@media (min-width: 981px) {
+  .report-panel.max { position: fixed; inset: 0; z-index: 70; padding: 16px 24px; background: rgba(8, 7, 5, 0.86); }
+  .report-panel.max .rp { height: 100%; max-width: 1480px; margin: 0 auto; }
+}
+.rp-body { overscroll-behavior: contain; }
 .rp-nav { display: flex; gap: 6px; overflow-x: auto; margin-top: 12px; padding-bottom: 3px; scrollbar-width: thin; }
 .rp-chip {
   flex: none; padding: 6px 11px; border-radius: 99px; font-size: 12px; font-weight: 600; letter-spacing: 0;
@@ -564,12 +587,14 @@ textarea.bulk-input:disabled { opacity: 0.6; }
 
 /* Tablets and phones: the report opens over the page instead of beside it. */
 @media (max-width: 980px) {
-  .browse { grid-template-columns: minmax(0, 1fr); }
+  .browse, .browse.sized { grid-template-columns: minmax(0, 1fr); }
   .report-panel { display: none; }
   .report-panel.open {
     display: block; position: fixed; inset: 0; z-index: 70; padding: 12px; background: rgba(8, 7, 5, 0.82);
   }
   .report-panel.open .rp { height: 100%; }
+  /* Already full-screen here, so no resizing or maximizing. */
+  .rp-resize, .rp-max { display: none; }
 }
 
 /* "Villa checked" message with a shortcut to its report. */
